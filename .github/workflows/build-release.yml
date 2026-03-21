@@ -1,0 +1,101 @@
+# BlankWhale — Build & Release Desktop Apps
+# Builds Mac (.dmg), Windows (.msi), and Linux (.AppImage/.deb) installers
+# Triggered on version tag push or manual dispatch
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: universal-apple-darwin
+            name: macOS
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: Windows
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            name: Linux
+
+    runs-on: ${{ matrix.platform }}
+    name: Build ${{ matrix.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'BlankWhale ${{ github.ref_name }}'
+          releaseBody: |
+            ## BlankWhale ${{ github.ref_name }}
+
+            Download for your platform:
+            - **macOS**: `.dmg` file
+            - **Windows**: `.msi` installer
+            - **Linux**: `.AppImage` or `.deb`
+
+            ### What's new
+            See [CHANGELOG](https://github.com/blankwhale/blankwhale/blob/main/CHANGELOG.md) for details.
+
+            ### Requirements
+            - For GPU training: NVIDIA CUDA or Apple Silicon
+            - Python 3.10+ (for training engine)
+          releaseDraft: false
+          prerelease: false
+
+  # Create a release summary
+  release-summary:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Release summary
+        run: |
+          echo "BlankWhale release ${{ github.ref_name }} built successfully!"
+          echo "Installers available at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
