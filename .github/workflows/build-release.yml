@@ -80,7 +80,7 @@ jobs:
             - **Linux**: `.AppImage` or `.deb`
 
             ### What's new
-            See [CHANGELOG](https://github.com/blankwhale/blankwhale/blob/main/CHANGELOG.md) for details.
+            See [CHANGELOG](https://github.com/SiyabongaDlamini/BlankWhale/blob/main/CHANGELOG.md) for details.
 
             ### Requirements
             - For GPU training: NVIDIA CUDA or Apple Silicon

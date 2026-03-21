@@ -24,9 +24,9 @@ Download BlankWhale for your operating system. No terminal commands needed — j
 
 | Platform | Download | Requirements |
 |----------|----------|--------------|
-| **macOS** (Apple Silicon & Intel) | [Download .dmg](https://github.com/blankwhale/blankwhale/releases/latest/download/BlankWhale_macos.dmg) | macOS 10.15+ |
-| **Windows** (64-bit) | [Download .msi](https://github.com/blankwhale/blankwhale/releases/latest/download/BlankWhale_windows.msi) | Windows 10+ |
-| **Linux** (64-bit) | [Download .AppImage](https://github.com/blankwhale/blankwhale/releases/latest/download/BlankWhale_linux.AppImage) | Ubuntu 20.04+ / Fedora 36+ |
+| **macOS** (Apple Silicon & Intel) | [Download .dmg](https://github.com/SiyabongaDlamini/BlankWhale/releases/latest/download/BlankWhale_macos.dmg) | macOS 10.15+ |
+| **Windows** (64-bit) | [Download .msi](https://github.com/SiyabongaDlamini/BlankWhale/releases/latest/download/BlankWhale_windows.msi) | Windows 10+ |
+| **Linux** (64-bit) | [Download .AppImage](https://github.com/SiyabongaDlamini/BlankWhale/releases/latest/download/BlankWhale_linux.AppImage) | Ubuntu 20.04+ / Fedora 36+ |
 
 > For GPU-accelerated training, install [CUDA](https://developer.nvidia.com/cuda-downloads) (NVIDIA) or use Apple Silicon (Metal support built-in).
 
@@ -93,7 +93,7 @@ Just [download the app](#download) for your platform. No setup needed.
 
 ```bash
 # Clone
-git clone https://github.com/blankwhale/blankwhale.git
+git clone https://github.com/SiyabongaDlamini/BlankWhale.git
 cd blankwhale
 
 # Frontend
