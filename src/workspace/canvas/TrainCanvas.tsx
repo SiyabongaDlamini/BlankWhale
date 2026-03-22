@@ -1,27 +1,27 @@
-import { useEngine } from '../../hooks/useEngine';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Play, Square, Cpu } from 'lucide-react';
+import type { TrainingConfig } from '../../App';
 
-export default function TrainCanvas() {
-  const {
-    isConnected,
-    hardware,
-    metrics,
-    statusMessage,
-    isTraining,
-    startTraining,
-    stopTraining
-  } = useEngine();
+interface TrainCanvasProps {
+  engine: ReturnType<typeof import('../../hooks/useEngine').useEngine>;
+  trainConfig: TrainingConfig;
+}
+
+export default function TrainCanvas({ engine, trainConfig }: TrainCanvasProps) {
+  const { isConnected, hardware, metrics, statusMessage, isTraining, startTraining, stopTraining } = engine;
 
   const handleStartStop = () => {
     if (isTraining) {
       stopTraining();
     } else {
-      // In a real app, this config would come from the UI (YAML editor or visual controls)
+      // Use real config from inspectors sidebar
       startTraining({
-        base_model: "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        epochs: 3,
-        batch_size: 4
+        base_model: trainConfig.baseModel,
+        strategy: trainConfig.strategy,
+        quantization: trainConfig.quantization,
+        epochs: trainConfig.epochs,
+        batch_size: trainConfig.batchSize,
+        learning_rate: trainConfig.learningRate,
       });
     }
   };
@@ -34,12 +34,9 @@ export default function TrainCanvas() {
   const currentLoss = getLatestMetric('loss') || 0;
   const currentLr = getLatestMetric('learning_rate') || 0;
   
-  // Estimate total steps (this would normally come from the engine based on dataset size)
   const estimatedTotalSteps = metrics.length > 0 && metrics[0].total_steps ? metrics[0].total_steps : 100;
-  
   const currentStep = metrics.length > 0 ? metrics[metrics.length - 1].step : 0;
   const currentEpoch = metrics.length > 0 ? metrics[metrics.length - 1].epoch : 0;
-  
   const progress = isTraining ? Math.min(100, (currentStep / estimatedTotalSteps) * 100) : 0;
 
   return (
@@ -73,7 +70,7 @@ export default function TrainCanvas() {
         )}
 
         <div className="ml-auto flex items-center gap-6 text-xs font-mono">
-          <span style={{ color: 'var(--text-muted)' }}>Epoch <span style={{ color: 'var(--text-primary)' }}>{currentEpoch.toFixed(2)}/3</span></span>
+          <span style={{ color: 'var(--text-muted)' }}>Epoch <span style={{ color: 'var(--text-primary)' }}>{currentEpoch.toFixed(2)}/{trainConfig.epochs}</span></span>
           <span style={{ color: 'var(--text-muted)' }}>Loss <span style={{ color: currentLoss < 1 ? 'var(--success)' : currentLoss < 2 ? 'var(--warning)' : 'var(--error)' }}>{currentLoss ? currentLoss.toFixed(4) : '-.----'}</span></span>
           <span style={{ color: 'var(--text-muted)' }}>Step <span style={{ color: 'var(--accent)' }}>{currentStep}</span></span>
         </div>
@@ -106,38 +103,14 @@ export default function TrainCanvas() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={metrics}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
-                <XAxis
-                  dataKey="step"
-                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                  stroke="var(--border-panel)"
-                  label={{ value: 'Step', position: 'insideBottom', offset: -5, fontSize: 10, fill: 'var(--text-muted)' }}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                  stroke="var(--border-panel)"
-                  domain={['auto', 'auto']}
-                  label={{ value: 'Loss', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: 'var(--text-muted)' }}
-                />
+                <XAxis dataKey="step" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} stroke="var(--border-panel)" label={{ value: 'Step', position: 'insideBottom', offset: -5, fontSize: 10, fill: 'var(--text-muted)' }} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} stroke="var(--border-panel)" domain={['auto', 'auto']} label={{ value: 'Loss', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: 'var(--text-muted)' }} />
                 <Tooltip
-                  contentStyle={{
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-panel)',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    color: 'var(--text-primary)',
-                  }}
+                  contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-panel)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-primary)' }}
                   formatter={(value: number) => value.toFixed(4)}
                   labelFormatter={(step) => `Step: ${step}`}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="loss"
-                  stroke="#0071e3"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Train Loss"
-                  isAnimationActive={false}
-                />
+                <Line type="monotone" dataKey="loss" stroke="#0071e3" strokeWidth={2} dot={false} name="Train Loss" isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -169,4 +142,3 @@ export default function TrainCanvas() {
     </div>
   );
 }
-

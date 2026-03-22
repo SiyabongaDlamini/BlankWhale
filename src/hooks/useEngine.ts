@@ -24,17 +24,15 @@ export function useEngine() {
   const [isTraining, setIsTraining] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
+  const inferenceCallbackRef = useRef<((response: string) => void) | null>(null);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    console.log("Connecting to BlankWhale engine at ws://localhost:9876...");
     const ws = new WebSocket('ws://localhost:9876');
 
     ws.onopen = () => {
-      console.log('Connected to engine');
       setIsConnected(true);
-      // Request hardware info on connect
       ws.send(JSON.stringify({ command: 'get_hardware' }));
     };
 
@@ -50,24 +48,39 @@ export function useEngine() {
             setStatusMessage(msg.data.message);
             if (msg.data.message === 'Training job started') {
               setIsTraining(true);
-              setMetrics([]); // Reset metrics on new run
+              setMetrics([]);
             } else if (msg.data.message.includes('complete') || msg.data.message.includes('Stopping')) {
               setIsTraining(false);
             }
             break;
           case 'metrics':
             setMetrics((prev) => {
-              // Only add if it's a new step to prevent duplicates
               if (prev.length > 0 && prev[prev.length - 1].step === msg.data.step) {
                 return prev;
               }
               return [...prev, msg.data];
             });
             break;
+          case 'inference_result':
+            if (inferenceCallbackRef.current) {
+              inferenceCallbackRef.current(msg.data.response);
+              inferenceCallbackRef.current = null;
+            }
+            break;
+          case 'dataset_loaded':
+            setStatusMessage(`Dataset loaded: ${msg.data.message || 'Ready'}`);
+            break;
+          case 'export_complete':
+            setStatusMessage(`Export complete: ${msg.data.output_path || 'Done'}`);
+            break;
           case 'error':
             console.error('Engine error:', msg.data.message);
             setStatusMessage(`Error: ${msg.data.message}`);
             setIsTraining(false);
+            if (inferenceCallbackRef.current) {
+              inferenceCallbackRef.current(`[Error] ${msg.data.message}`);
+              inferenceCallbackRef.current = null;
+            }
             break;
         }
       } catch (err) {
@@ -76,15 +89,12 @@ export function useEngine() {
     };
 
     ws.onclose = () => {
-      console.log('Disconnected from engine');
       setIsConnected(false);
       setIsTraining(false);
-      // Auto-reconnect after 3 seconds
       setTimeout(connect, 3000);
     };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+    ws.onerror = () => {
       ws.close();
     };
 
@@ -100,14 +110,10 @@ export function useEngine() {
     };
   }, [connect]);
 
-  const startTraining = useCallback((config: any) => {
+  const startTraining = useCallback((config: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        command: 'start_training',
-        config
-      }));
+      wsRef.current.send(JSON.stringify({ command: 'start_training', config }));
     } else {
-      console.error("Cannot start training: Engine not connected");
       setStatusMessage("Error: Engine not connected. Is the Python server running?");
     }
   }, []);
@@ -120,11 +126,26 @@ export function useEngine() {
 
   const exportModel = useCallback((config: { format: string, output_path: string }) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        command: 'export_model',
-        config
-      }));
+      wsRef.current.send(JSON.stringify({ command: 'export_model', config }));
       setStatusMessage(`Exporting model as ${config.format.toUpperCase()}...`);
+    } else {
+      setStatusMessage("Error: Engine not connected.");
+    }
+  }, []);
+
+  const runInference = useCallback((prompt: string, callback: (response: string) => void) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      inferenceCallbackRef.current = callback;
+      wsRef.current.send(JSON.stringify({ command: 'inference', config: { prompt } }));
+    } else {
+      callback("[Error] Engine not connected.");
+    }
+  }, []);
+
+  const loadHfDataset = useCallback((datasetName: string, split?: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setStatusMessage(`Loading dataset: ${datasetName}...`);
+      wsRef.current.send(JSON.stringify({ command: 'load_hf_dataset', config: { dataset_name: datasetName, split: split || 'train' } }));
     } else {
       setStatusMessage("Error: Engine not connected.");
     }
@@ -138,6 +159,8 @@ export function useEngine() {
     isTraining,
     startTraining,
     stopTraining,
-    exportModel
+    exportModel,
+    runInference,
+    loadHfDataset,
   };
 }

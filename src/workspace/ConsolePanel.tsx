@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Terminal, Activity, AlertTriangle, Trash2 } from 'lucide-react';
+import { Terminal, Activity, Cpu, Trash2 } from 'lucide-react';
 import type { WorkspaceTab } from '../App';
+import type { useEngine } from '../hooks/useEngine';
 
 interface ConsolePanelProps {
   activeTab: WorkspaceTab;
+  engine: ReturnType<typeof useEngine>;
 }
 
 interface LogEntry {
@@ -12,21 +14,6 @@ interface LogEntry {
   message: string;
 }
 
-const INITIAL_LOGS: LogEntry[] = [
-  { time: '00:00:01', type: 'info', message: '[system] BlankWhale v2.0 initialized' },
-  { time: '00:00:01', type: 'info', message: '[system] GPU cluster connected — 8× A100 80GB allocated' },
-  { time: '00:00:02', type: 'success', message: '[data] Loaded 8 files (13.7 MB total)' },
-  { time: '00:00:02', type: 'info', message: '[data] Auto-cleaning pipeline started...' },
-  { time: '00:00:03', type: 'success', message: '[data] medical_notes.pdf — 18,432 tokens extracted' },
-  { time: '00:00:03', type: 'success', message: '[data] patient_data.csv — 6,210 tokens extracted' },
-  { time: '00:00:04', type: 'success', message: '[data] research_paper.pdf — 42,100 tokens extracted' },
-  { time: '00:00:04', type: 'warn', message: '[clean] clinical_trials.docx — 2 broken text segments repaired' },
-  { time: '00:00:05', type: 'success', message: '[data] drug_interactions.json — 2,150 tokens extracted' },
-  { time: '00:00:05', type: 'info', message: '[tokenizer] BPE tokenizer loaded (vocab_size=32000)' },
-  { time: '00:00:06', type: 'success', message: '[prepare] Chunking complete — 162 chunks @ avg 511 tokens' },
-  { time: '00:00:06', type: 'info', message: '[system] Workspace ready. Total: 82,782 tokens across 8 files.' },
-];
-
 const TYPE_COLORS: Record<string, string> = {
   info: 'var(--text-muted)',
   success: 'var(--success)',
@@ -34,10 +21,14 @@ const TYPE_COLORS: Record<string, string> = {
   error: 'var(--error)',
 };
 
-export default function ConsolePanel({ activeTab }: ConsolePanelProps) {
-  const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
+export default function ConsolePanel({ activeTab, engine }: ConsolePanelProps) {
+  const [logs, setLogs] = useState<LogEntry[]>([
+    { time: new Date().toLocaleTimeString('en', { hour12: false }), type: 'info', message: '[system] BlankWhale initialized — waiting for engine...' },
+  ]);
   const [consoleTab, setConsoleTab] = useState<'console' | 'activity' | 'gpu'>('console');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevStatus = useRef<string>('');
+  const prevConnected = useRef<boolean>(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -45,49 +36,67 @@ export default function ConsolePanel({ activeTab }: ConsolePanelProps) {
     }
   }, [logs]);
 
-  // Add a log when switching workspace tabs
+  // Log when connection changes
   useEffect(() => {
-    const msg = `[nav] Switched to ${activeTab.toUpperCase()} workspace`;
-    setLogs(prev => [...prev, {
-      time: new Date().toLocaleTimeString('en', { hour12: false }),
-      type: 'info',
-      message: msg,
-    }]);
+    if (engine.isConnected !== prevConnected.current) {
+      prevConnected.current = engine.isConnected;
+      const now = new Date().toLocaleTimeString('en', { hour12: false });
+      if (engine.isConnected) {
+        setLogs(prev => [...prev, { time: now, type: 'success', message: '[engine] Connected to Python training engine on ws://localhost:9876' }]);
+      } else {
+        setLogs(prev => [...prev, { time: now, type: 'warn', message: '[engine] Disconnected — will retry in 3s...' }]);
+      }
+    }
+  }, [engine.isConnected]);
+
+  // Log engine status messages
+  useEffect(() => {
+    if (engine.statusMessage && engine.statusMessage !== prevStatus.current) {
+      prevStatus.current = engine.statusMessage;
+      const now = new Date().toLocaleTimeString('en', { hour12: false });
+      const isError = engine.statusMessage.startsWith('Error');
+      setLogs(prev => [...prev, {
+        time: now,
+        type: isError ? 'error' : 'info',
+        message: `[engine] ${engine.statusMessage}`
+      }]);
+    }
+  }, [engine.statusMessage]);
+
+  // Log training metrics periodically (every 10 steps)
+  useEffect(() => {
+    if (engine.metrics.length > 0 && engine.metrics.length % 10 === 0) {
+      const m = engine.metrics[engine.metrics.length - 1];
+      const now = new Date().toLocaleTimeString('en', { hour12: false });
+      setLogs(prev => [...prev, {
+        time: now,
+        type: 'info',
+        message: `[train] step=${m.step} loss=${m.loss.toFixed(4)} lr=${m.learning_rate?.toExponential(2) || '-'}`
+      }]);
+    }
+  }, [engine.metrics.length]);
+
+  // Log tab switches
+  useEffect(() => {
+    const now = new Date().toLocaleTimeString('en', { hour12: false });
+    setLogs(prev => [...prev, { time: now, type: 'info', message: `[nav] Switched to ${activeTab.toUpperCase()} workspace` }]);
   }, [activeTab]);
 
   return (
     <div className="h-full flex flex-col panel">
-      {/* Header with sub-tabs */}
       <div className="panel-header">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setConsoleTab('console')}
-            className={`flex items-center gap-1.5 text-xs font-medium transition-colors ${consoleTab === 'console' ? '' : ''}`}
-            style={{ color: consoleTab === 'console' ? 'var(--accent)' : 'var(--text-muted)' }}
-          >
+          <button onClick={() => setConsoleTab('console')} className="flex items-center gap-1.5 text-xs font-medium transition-colors" style={{ color: consoleTab === 'console' ? 'var(--accent)' : 'var(--text-muted)' }}>
             <Terminal className="w-3 h-3" /> Console
           </button>
-          <button
-            onClick={() => setConsoleTab('activity')}
-            className="flex items-center gap-1.5 text-xs font-medium transition-colors"
-            style={{ color: consoleTab === 'activity' ? 'var(--accent)' : 'var(--text-muted)' }}
-          >
+          <button onClick={() => setConsoleTab('activity')} className="flex items-center gap-1.5 text-xs font-medium transition-colors" style={{ color: consoleTab === 'activity' ? 'var(--accent)' : 'var(--text-muted)' }}>
             <Activity className="w-3 h-3" /> Activity
           </button>
-          <button
-            onClick={() => setConsoleTab('gpu')}
-            className="flex items-center gap-1.5 text-xs font-medium transition-colors"
-            style={{ color: consoleTab === 'gpu' ? 'var(--accent)' : 'var(--text-muted)' }}
-          >
-            <AlertTriangle className="w-3 h-3" /> GPU
+          <button onClick={() => setConsoleTab('gpu')} className="flex items-center gap-1.5 text-xs font-medium transition-colors" style={{ color: consoleTab === 'gpu' ? 'var(--accent)' : 'var(--text-muted)' }}>
+            <Cpu className="w-3 h-3" /> Hardware
           </button>
         </div>
-
-        <button
-          onClick={() => setLogs([])}
-          className="p-1 rounded hover:bg-[var(--bg-elevated)] transition-colors"
-          title="Clear"
-        >
+        <button onClick={() => setLogs([])} className="p-1 rounded hover:bg-[var(--bg-elevated)] transition-colors" title="Clear">
           <Trash2 className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
         </button>
       </div>
@@ -107,52 +116,68 @@ export default function ConsolePanel({ activeTab }: ConsolePanelProps) {
         </div>
       )}
 
-      {/* Activity */}
+      {/* Activity — real events */}
       {consoleTab === 'activity' && (
         <div className="flex-1 overflow-y-auto p-3 text-xs space-y-2">
-          {[
-            { action: 'Uploaded 8 files', time: '2m ago', status: 'done' },
-            { action: 'Auto-cleaning pipeline', time: '1m ago', status: 'done' },
-            { action: 'BPE tokenization', time: '45s ago', status: 'done' },
-            { action: 'Embedding generation', time: 'now', status: 'running' },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center justify-between p-2 rounded" style={{ background: 'var(--bg-surface)' }}>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${item.status === 'running' ? 'bg-blue-500 live-dot' : 'bg-emerald-500'}`} />
-                <span style={{ color: 'var(--text-secondary)' }}>{item.action}</span>
-              </div>
-              <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{item.time}</span>
+          <div className="flex items-center justify-between p-2 rounded" style={{ background: 'var(--bg-surface)' }}>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${engine.isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span style={{ color: 'var(--text-secondary)' }}>Engine Connection</span>
             </div>
-          ))}
+            <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{engine.isConnected ? 'Connected' : 'Disconnected'}</span>
+          </div>
+          {engine.isTraining && (
+            <div className="flex items-center justify-between p-2 rounded" style={{ background: 'var(--bg-surface)' }}>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-blue-500 live-dot" />
+                <span style={{ color: 'var(--text-secondary)' }}>Training in progress</span>
+              </div>
+              <span className="font-mono" style={{ color: 'var(--text-muted)' }}>
+                Step {engine.metrics.length > 0 ? engine.metrics[engine.metrics.length - 1].step : 0}
+              </span>
+            </div>
+          )}
+          {engine.metrics.length > 0 && !engine.isTraining && (
+            <div className="flex items-center justify-between p-2 rounded" style={{ background: 'var(--bg-surface)' }}>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span style={{ color: 'var(--text-secondary)' }}>Training completed</span>
+              </div>
+              <span className="font-mono" style={{ color: 'var(--text-muted)' }}>
+                Loss: {engine.metrics[engine.metrics.length - 1].loss.toFixed(4)}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
-      {/* GPU Monitor */}
+      {/* Hardware Monitor — real data */}
       {consoleTab === 'gpu' && (
         <div className="flex-1 overflow-y-auto p-3">
-          <div className="grid grid-cols-4 gap-3">
-            {[0, 1, 2, 3, 4, 5, 6, 7].map(i => {
-              const usage = Math.floor(Math.random() * 40) + 30;
-              const temp = Math.floor(Math.random() * 15) + 55;
-              return (
-                <div key={i} className="stat-card">
-                  <div className="stat-label">GPU {i}</div>
-                  <div className="flex items-end gap-1">
-                    <span className="stat-value text-sm">{usage}%</span>
-                    <span className="text-xs font-mono mb-0.5" style={{ color: temp > 65 ? 'var(--warning)' : 'var(--text-muted)' }}>
-                      {temp}°C
-                    </span>
-                  </div>
-                  <div className="h-1 rounded-full mt-2" style={{ background: 'var(--bg-workspace)' }}>
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${usage}%`, background: usage > 70 ? 'var(--warning)' : 'var(--accent)' }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {engine.hardware ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="stat-card">
+                <div className="stat-label">Device</div>
+                <div className="stat-value text-sm">{engine.hardware.device.toUpperCase()}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">GPU</div>
+                <div className="stat-value text-sm">{engine.hardware.gpu_available ? (engine.hardware.gpu_name || 'Available') : 'None'}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">GPU Memory</div>
+                <div className="stat-value text-sm">{engine.hardware.gpu_memory_gb ? `${engine.hardware.gpu_memory_gb} GB` : '—'}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">System RAM</div>
+                <div className="stat-value text-sm">{engine.hardware.ram_gb} GB</div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+              Waiting for engine connection to detect hardware...
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocalStorage } from './hooks/useLocalStorage';
 import './App.css';
 
 import TopBar from './workspace/TopBar';
@@ -12,14 +13,38 @@ import EvaluateCanvas from './workspace/canvas/EvaluateCanvas';
 import DeployCanvas from './workspace/canvas/DeployCanvas';
 import NetworkCanvas from './workspace/canvas/NetworkCanvas';
 import CodeCanvas from './workspace/canvas/CodeCanvas';
+import { useEngine } from './hooks/useEngine';
 
 export type WorkspaceTab = 'data' | 'prepare' | 'train' | 'evaluate' | 'deploy' | 'code';
 
+export interface TrainingConfig {
+  baseModel: string;
+  strategy: string;
+  epochs: number;
+  learningRate: number;
+  batchSize: number;
+  quantization: string;
+}
+
+const DEFAULT_CONFIG: TrainingConfig = {
+  baseModel: 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
+  strategy: 'lora',
+  epochs: 3,
+  learningRate: 0.0003,
+  batchSize: 4,
+  quantization: '4bit',
+};
+
 function App() {
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>('data');
+  const [activeTab, setActiveTab] = useLocalStorage<WorkspaceTab>('bw_activeTab', 'data');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [files, setFiles] = useState<LocalFile[]>([]);
   const [showNetwork, setShowNetwork] = useState(false);
+  const [projectName, setProjectName] = useLocalStorage('bw_projectName', 'my-project');
+  const [trainConfig, setTrainConfig] = useLocalStorage<TrainingConfig>('bw_trainConfig', DEFAULT_CONFIG);
+
+  // Engine state (single instance, shared via props)
+  const engine = useEngine();
 
   // Panel widths (in px) and bottom panel height
   const [leftWidth, setLeftWidth] = useState(200);
@@ -28,11 +53,11 @@ function App() {
 
   const renderCanvas = () => {
     switch (activeTab) {
-      case 'data': return <DataCanvas files={files} setFiles={setFiles} selectedFile={selectedFile} setSelectedFile={setSelectedFile} />;
+      case 'data': return <DataCanvas files={files} setFiles={setFiles} selectedFile={selectedFile} setSelectedFile={setSelectedFile} engine={engine} />;
       case 'prepare': return <PrepareCanvas files={files} />;
-      case 'train': return <TrainCanvas />;
-      case 'evaluate': return <EvaluateCanvas files={files} />;
-      case 'deploy': return <DeployCanvas />;
+      case 'train': return <TrainCanvas engine={engine} trainConfig={trainConfig} />;
+      case 'evaluate': return <EvaluateCanvas files={files} engine={engine} />;
+      case 'deploy': return <DeployCanvas engine={engine} />;
       case 'code': return <CodeCanvas />;
     }
   };
@@ -40,7 +65,17 @@ function App() {
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-workspace)' }}>
       {/* Top Bar */}
-      <TopBar activeTab={activeTab} setActiveTab={setActiveTab} showNetwork={showNetwork} setShowNetwork={setShowNetwork} />
+      <TopBar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        showNetwork={showNetwork}
+        setShowNetwork={setShowNetwork}
+        projectName={projectName}
+        setProjectName={setProjectName}
+        engine={engine}
+        files={files}
+        trainConfig={trainConfig}
+      />
 
       {/* Main Workspace */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -64,7 +99,7 @@ function App() {
 
           {/* Right Panel — Inspector */}
           <div style={{ width: rightWidth, minWidth: 180, maxWidth: 450 }} className="flex-shrink-0 border-l overflow-hidden">
-            <Inspector activeTab={activeTab} selectedFile={selectedFile} files={files} />
+            <Inspector activeTab={activeTab} selectedFile={selectedFile} files={files} trainConfig={trainConfig} setTrainConfig={setTrainConfig} engine={engine} />
           </div>
         </div>
 
@@ -73,7 +108,7 @@ function App() {
 
         {/* Bottom Panel — Console */}
         <div style={{ height: bottomHeight, minHeight: 80, maxHeight: 400 }} className="flex-shrink-0 border-t overflow-hidden">
-          <ConsolePanel activeTab={activeTab} />
+          <ConsolePanel activeTab={activeTab} engine={engine} />
         </div>
       </div>
     </div>
@@ -128,3 +163,4 @@ function ResizeHandle({ direction, onResize }: { direction: 'horizontal' | 'vert
 }
 
 export default App;
+

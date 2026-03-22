@@ -24,6 +24,8 @@ class MetricsServer:
         self.clients: set = set()
         self.trainer = None
         self._server = None
+        self._model = None
+        self._tokenizer = None
 
     async def handler(self, websocket):
         """Handle a new WebSocket connection."""
@@ -81,6 +83,14 @@ class MetricsServer:
                 export_config = msg.get("config", {})
                 asyncio.create_task(self._run_export(export_config))
 
+            elif command == "inference":
+                inference_config = msg.get("config", {})
+                asyncio.create_task(self._run_inference(websocket, inference_config))
+
+            elif command == "load_hf_dataset":
+                dataset_config = msg.get("config", {})
+                asyncio.create_task(self._load_hf_dataset(websocket, dataset_config))
+
             else:
                 await websocket.send(json.dumps({
                     "event": "error",
@@ -108,10 +118,12 @@ class MetricsServer:
 
         self.trainer = BlankWhaleTrainer(training_config, on_metrics=on_metrics)
 
-        # Run in thread to not block the event loop
         loop = asyncio.get_event_loop()
         try:
             await loop.run_in_executor(None, self.trainer.setup)
+            # Save model/tokenizer reference for inference later
+            self._model = self.trainer.model
+            self._tokenizer = self.trainer.tokenizer
             await loop.run_in_executor(None, self.trainer.train)
         except Exception as e:
             await self._broadcast(json.dumps({
@@ -145,6 +157,95 @@ class MetricsServer:
             await self._broadcast(json.dumps({
                 "event": "error",
                 "data": {"message": f"Export failed: {e}"},
+            }))
+
+    async def _run_inference(self, websocket, config: dict):
+        """Run model inference and return the result."""
+        prompt = config.get("prompt", "")
+
+        if not self._model or not self._tokenizer:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": "No model loaded. Please train or load a model first."},
+            }))
+            return
+
+        loop = asyncio.get_event_loop()
+        try:
+            def generate():
+                import torch
+                inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+                with torch.no_grad():
+                    outputs = self._model.generate(
+                        **inputs,
+                        max_new_tokens=256,
+                        temperature=0.7,
+                        do_sample=True,
+                        top_p=0.9,
+                    )
+                # Decode only the new tokens
+                response = self._tokenizer.decode(
+                    outputs[0][inputs["input_ids"].shape[1]:],
+                    skip_special_tokens=True
+                )
+                return response.strip()
+
+            response = await loop.run_in_executor(None, generate)
+            await websocket.send(json.dumps({
+                "event": "inference_result",
+                "data": {"response": response, "prompt": prompt},
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": f"Inference failed: {e}"},
+            }))
+
+    async def _load_hf_dataset(self, websocket, config: dict):
+        """Load a HuggingFace dataset and save to local disk."""
+        dataset_name = config.get("dataset_name", "")
+        split = config.get("split", "train")
+
+        if not dataset_name:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": "No dataset name provided."},
+            }))
+            return
+
+        loop = asyncio.get_event_loop()
+        try:
+            await websocket.send(json.dumps({
+                "event": "status",
+                "data": {"message": f"Downloading {dataset_name}..."},
+            }))
+
+            def download():
+                import os
+                from datasets import load_dataset
+
+                ds = load_dataset(dataset_name, split=split)
+                os.makedirs("./data", exist_ok=True)
+                output_path = f"./data/{dataset_name.replace('/', '_')}_{split}.jsonl"
+                ds.to_json(output_path)
+                return {
+                    "path": output_path,
+                    "num_rows": len(ds),
+                    "columns": list(ds.column_names),
+                }
+
+            result = await loop.run_in_executor(None, download)
+            await websocket.send(json.dumps({
+                "event": "dataset_loaded",
+                "data": {
+                    "message": f"Loaded {result['num_rows']} rows from {dataset_name}",
+                    **result,
+                },
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": f"Failed to load dataset: {e}"},
             }))
 
     async def _broadcast(self, message: str):
@@ -186,7 +287,6 @@ def start_server(host: str = "127.0.0.1", port: int = 9876):
 
     server = MetricsServer(host=host, port=port)
 
-    # Handle graceful shutdown
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 

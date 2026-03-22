@@ -1,19 +1,40 @@
-import { useState } from 'react';
-import type { WorkspaceTab } from '../App';
+import type { WorkspaceTab, TrainingConfig } from '../App';
 import type { LocalFile } from './FileExplorer';
+import type { useEngine } from '../hooks/useEngine';
+
+const BASE_MODELS = [
+  { id: 'TinyLlama/TinyLlama-1.1B-Chat-v1.0', name: 'TinyLlama 1.1B', size: '~2 GB' },
+  { id: 'meta-llama/Llama-3.1-8B', name: 'Llama 3.1 8B', size: '~16 GB' },
+  { id: 'mistralai/Mistral-7B-v0.3', name: 'Mistral 7B v0.3', size: '~14 GB' },
+  { id: 'google/gemma-2-9b', name: 'Gemma 2 9B', size: '~18 GB' },
+  { id: 'microsoft/phi-3-mini-4k-instruct', name: 'Phi-3 Mini', size: '~8 GB' },
+];
+
+const STRATEGIES = [
+  { id: 'lora', name: 'LoRA (Recommended)' },
+  { id: 'qlora', name: 'QLoRA (4-bit)' },
+  { id: 'full', name: 'Full Fine-tune' },
+];
 
 interface InspectorProps {
   activeTab: WorkspaceTab;
   selectedFile: string | null;
   files?: LocalFile[];
+  trainConfig: TrainingConfig;
+  setTrainConfig: React.Dispatch<React.SetStateAction<TrainingConfig>>;
+  engine: ReturnType<typeof useEngine>;
 }
 
-export default function Inspector({ activeTab, selectedFile, files = [] }: InspectorProps) {
-  const [epochs, setEpochs] = useState(5);
-  const [lr, setLr] = useState(0.0003);
-  const [batchSize, setBatchSize] = useState(16);
-
+export default function Inspector({ activeTab, selectedFile, files = [], trainConfig, setTrainConfig, engine }: InspectorProps) {
+  const { hardware, metrics, isTraining } = engine;
   const fileMeta = files.find(f => f.name === selectedFile);
+
+  const isTrained = metrics.length > 0;
+  const finalLoss = isTrained ? metrics[metrics.length - 1].loss.toFixed(4) : '—';
+
+  const updateConfig = <K extends keyof TrainingConfig>(key: K, value: TrainingConfig[K]) => {
+    setTrainConfig(prev => ({ ...prev, [key]: value }));
+  };
 
   return (
     <div className="h-full flex flex-col panel">
@@ -21,7 +42,7 @@ export default function Inspector({ activeTab, selectedFile, files = [] }: Inspe
         <span className="panel-header-title">Properties</span>
       </div>
 
-      <div className="panel-body flex-1 space-y-4">
+      <div className="panel-body flex-1 space-y-4 overflow-y-auto">
         {activeTab === 'data' && selectedFile && fileMeta && (
           <>
             <Section title="File Info">
@@ -29,57 +50,27 @@ export default function Inspector({ activeTab, selectedFile, files = [] }: Inspe
               <PropRow label="Type" value={fileMeta.type.toUpperCase()} />
               <PropRow label="Size" value={fileMeta.size} />
               <PropRow label="Encoding" value="UTF-8" />
-              <PropRow label="Language" value="auto" badge="auto" />
             </Section>
             <Section title="Processing">
               <PropRow label="Status" value={fileMeta.status} badgeColor={fileMeta.status === 'ready' ? 'green' : 'amber'} />
-              <PropRow label="Tokens" value="—" mono />
-              <PropRow label="Chunks" value="—" mono />
-              <PropRow label="Duplicates" value="0 found" />
-            </Section>
-            <Section title="Auto Cleaning">
-              <PropRow label="Encoding Fix" value="Applied" badgeColor="green" />
-              <PropRow label="Whitespace" value="Normalized" badgeColor="green" />
             </Section>
           </>
         )}
 
         {activeTab === 'prepare' && (
-          <>
-            <Section title="Tokenizer">
-              <div className="space-y-3">
-                <div>
-                  <label className="ctrl-label">Tokenizer Type</label>
-                  <select className="ctrl-input text-xs">
-                    <option>BPE (Byte Pair Encoding)</option>
-                    <option>WordPiece</option>
-                    <option>SentencePiece</option>
-                    <option>Tiktoken (GPT-4)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="ctrl-label">Chunk Size</label>
-                  <div className="flex items-center gap-2">
-                    <input type="range" min="128" max="2048" step="64" defaultValue={512} className="flex-1" />
-                    <span className="text-xs font-mono w-10 text-right" style={{ color: 'var(--accent)' }}>512</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="ctrl-label">Overlap</label>
-                  <div className="flex items-center gap-2">
-                    <input type="range" min="0" max="256" step="16" defaultValue={64} className="flex-1" />
-                    <span className="text-xs font-mono w-10 text-right" style={{ color: 'var(--accent)' }}>64</span>
-                  </div>
-                </div>
+          <Section title="Tokenizer">
+            <div className="space-y-3">
+              <div>
+                <label className="ctrl-label">Tokenizer Type</label>
+                <select className="ctrl-input text-xs">
+                  <option>BPE (Byte Pair Encoding)</option>
+                  <option>WordPiece</option>
+                  <option>SentencePiece</option>
+                  <option>Tiktoken (GPT-4)</option>
+                </select>
               </div>
-            </Section>
-            <Section title="Stats">
-              <PropRow label="Total Tokens" value="82,782" mono />
-              <PropRow label="Total Chunks" value="162" mono />
-              <PropRow label="Avg. Chunk" value="511 tokens" mono />
-              <PropRow label="Est. Cost" value="$0.083" mono />
-            </Section>
-          </>
+            </div>
+          </Section>
         )}
 
         {activeTab === 'train' && (
@@ -88,21 +79,28 @@ export default function Inspector({ activeTab, selectedFile, files = [] }: Inspe
               <div className="space-y-3">
                 <div>
                   <label className="ctrl-label">Base Model</label>
-                  <select className="ctrl-input text-xs">
-                    <option>Llama 3.1 8B</option>
-                    <option>Mistral 7B v0.3</option>
-                    <option>Gemma 2 9B</option>
-                    <option>Phi-3 Mini</option>
-                    <option>GPT-4o (Fine-tune)</option>
+                  <select
+                    className="ctrl-input text-xs"
+                    value={trainConfig.baseModel}
+                    onChange={e => updateConfig('baseModel', e.target.value)}
+                    disabled={isTraining}
+                  >
+                    {BASE_MODELS.map(m => (
+                      <option key={m.id} value={m.id}>{m.name} ({m.size})</option>
+                    ))}
                   </select>
                 </div>
                 <div>
                   <label className="ctrl-label">Strategy</label>
-                  <select className="ctrl-input text-xs">
-                    <option>LoRA (Recommended)</option>
-                    <option>QLoRA</option>
-                    <option>Full Fine-tune</option>
-                    <option>RAG Pipeline</option>
+                  <select
+                    className="ctrl-input text-xs"
+                    value={trainConfig.strategy}
+                    onChange={e => updateConfig('strategy', e.target.value)}
+                    disabled={isTraining}
+                  >
+                    {STRATEGIES.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -112,71 +110,49 @@ export default function Inspector({ activeTab, selectedFile, files = [] }: Inspe
                 <div>
                   <label className="ctrl-label">Epochs</label>
                   <div className="flex items-center gap-2">
-                    <input type="range" min="1" max="20" value={epochs} onChange={e => setEpochs(+e.target.value)} className="flex-1" />
-                    <span className="text-xs font-mono w-6 text-right" style={{ color: 'var(--accent)' }}>{epochs}</span>
+                    <input type="range" min="1" max="20" value={trainConfig.epochs} onChange={e => updateConfig('epochs', +e.target.value)} className="flex-1" disabled={isTraining} />
+                    <span className="text-xs font-mono w-6 text-right" style={{ color: 'var(--accent)' }}>{trainConfig.epochs}</span>
                   </div>
                 </div>
                 <div>
                   <label className="ctrl-label">Learning Rate</label>
                   <div className="flex items-center gap-2">
-                    <input type="range" min="0.00001" max="0.01" step="0.00001" value={lr} onChange={e => setLr(+e.target.value)} className="flex-1" />
-                    <span className="text-xs font-mono w-16 text-right" style={{ color: 'var(--accent)' }}>{lr.toFixed(5)}</span>
+                    <input type="range" min="0.00001" max="0.01" step="0.00001" value={trainConfig.learningRate} onChange={e => updateConfig('learningRate', +e.target.value)} className="flex-1" disabled={isTraining} />
+                    <span className="text-xs font-mono w-16 text-right" style={{ color: 'var(--accent)' }}>{trainConfig.learningRate.toFixed(5)}</span>
                   </div>
                 </div>
                 <div>
                   <label className="ctrl-label">Batch Size</label>
                   <div className="flex items-center gap-2">
-                    <input type="range" min="1" max="64" value={batchSize} onChange={e => setBatchSize(+e.target.value)} className="flex-1" />
-                    <span className="text-xs font-mono w-6 text-right" style={{ color: 'var(--accent)' }}>{batchSize}</span>
+                    <input type="range" min="1" max="64" value={trainConfig.batchSize} onChange={e => updateConfig('batchSize', +e.target.value)} className="flex-1" disabled={isTraining} />
+                    <span className="text-xs font-mono w-6 text-right" style={{ color: 'var(--accent)' }}>{trainConfig.batchSize}</span>
                   </div>
                 </div>
               </div>
             </Section>
             <Section title="Compute">
-              <PropRow label="GPU" value="8x A100 80GB" />
-              <PropRow label="VRAM Est." value="62.4 GB" mono />
-              <PropRow label="Est. Time" value="~14 min" mono />
-              <PropRow label="Est. Cost" value="$2.80" mono />
+              <PropRow label="GPU" value={hardware?.gpu_available ? (hardware.gpu_name || 'GPU') : 'CPU'} />
+              <PropRow label="RAM" value={hardware ? `${hardware.ram_gb} GB` : '—'} mono />
+              <PropRow label="Device" value={hardware?.device?.toUpperCase() || '—'} />
             </Section>
           </>
         )}
 
         {activeTab === 'evaluate' && (
           <>
-            <Section title="Model Info">
-              <PropRow label="Base" value="Llama 3.1 8B" />
-              <PropRow label="Adapter" value="LoRA r=16" />
-              <PropRow label="Parameters" value="8.03B" mono />
-            </Section>
-            <Section title="Benchmarks">
-              <PropRow label="BLEU" value="0.847" mono />
-              <PropRow label="ROUGE-L" value="0.912" mono />
-              <PropRow label="Perplexity" value="4.21" mono />
-              <PropRow label="F1 Score" value="0.893" mono />
+            <Section title="Model Status">
+              <PropRow label="Status" value={isTrained ? 'Trained' : 'No Model'} badgeColor={isTrained ? 'green' : 'amber'} />
+              <PropRow label="Final Loss" value={finalLoss} mono />
+              <PropRow label="Training Data" value={`${files.length} files`} />
             </Section>
           </>
         )}
 
         {activeTab === 'deploy' && (
           <>
-            <Section title="Endpoint">
-              <PropRow label="Status" value="Live" badgeColor="green" />
-              <PropRow label="URL" value="api.blankwhale.ai/v1" />
-              <PropRow label="Latency" value="120ms" mono />
-              <PropRow label="Requests" value="1,284" mono />
-            </Section>
-            <Section title="Export">
-              <div className="space-y-2">
-                <button className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer">
-                  Download GGUF Weights
-                </button>
-                <button className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer">
-                  Copy API Endpoint
-                </button>
-                <button className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer">
-                  Embed Chat Widget
-                </button>
-              </div>
+            <Section title="Local API">
+              <PropRow label="Status" value={engine.isConnected ? 'Engine Ready' : 'Offline'} badgeColor={engine.isConnected ? 'green' : 'red'} />
+              <PropRow label="URL" value="localhost:9876" />
             </Section>
           </>
         )}

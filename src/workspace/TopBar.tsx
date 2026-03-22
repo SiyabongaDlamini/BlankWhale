@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react';
 import { Save, Settings, Play, ChevronDown, Download, Share2 } from 'lucide-react';
-import { open } from '@tauri-apps/plugin-shell';
-import type { WorkspaceTab } from '../App';
+import type { WorkspaceTab, TrainingConfig } from '../App';
+import type { LocalFile } from './FileExplorer';
+import type { useEngine } from '../hooks/useEngine';
 
 interface TopBarProps {
   activeTab: WorkspaceTab;
   setActiveTab: (tab: WorkspaceTab) => void;
   showNetwork: boolean;
   setShowNetwork: (show: boolean) => void;
+  projectName: string;
+  setProjectName: (name: string) => void;
+  engine: ReturnType<typeof useEngine>;
+  files: LocalFile[];
+  trainConfig: TrainingConfig;
 }
 
 const TABS: { id: WorkspaceTab; label: string }[] = [
@@ -19,9 +25,11 @@ const TABS: { id: WorkspaceTab; label: string }[] = [
   { id: 'code', label: 'Code' },
 ];
 
-export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNetwork }: TopBarProps) {
+export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNetwork, projectName, setProjectName, engine, files, trainConfig }: TopBarProps) {
   const [updateStatus, setUpdateStatus] = useState<'checking' | 'available' | 'updated' | 'error'>('checking');
   const [latestUrl, setLatestUrl] = useState('https://github.com/SiyabongaDlamini/BlankWhale/releases/latest');
+  const [editingName, setEditingName] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     fetch('https://api.github.com/repos/SiyabongaDlamini/BlankWhale/releases/latest')
@@ -33,11 +41,10 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
             setUpdateStatus('available');
             setLatestUrl(data.html_url);
           } else {
-            // Either up to date, or ahead of tag
             setUpdateStatus('updated');
           }
         } else {
-          setUpdateStatus('updated'); // default fallback if no releases
+          setUpdateStatus('updated');
         }
       })
       .catch(() => setUpdateStatus('error'));
@@ -45,9 +52,8 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
 
   const handleUpdateClick = () => {
     if (updateStatus === 'available') {
-      open(latestUrl);
+      window.open(latestUrl, '_blank');
     } else if (updateStatus !== 'checking') {
-      // Force a manual re-check
       setUpdateStatus('checking');
       fetch('https://api.github.com/repos/SiyabongaDlamini/BlankWhale/releases/latest')
         .then(res => res.json())
@@ -55,13 +61,38 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
           if (data && data.tag_name && data.tag_name > 'v0.1.1') {
             setUpdateStatus('available');
             setLatestUrl(data.html_url);
-            open(data.html_url);
           } else {
             setUpdateStatus('updated');
           }
         })
         .catch(() => setUpdateStatus('error'));
     }
+  };
+
+  const handleSave = () => {
+    const state = {
+      projectName,
+      activeTab,
+      trainConfig,
+      files: files.map(f => ({ name: f.name, type: f.type, size: f.size, rawSize: f.rawSize, status: f.status })),
+    };
+    localStorage.setItem('blankwhale_project', JSON.stringify(state));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleRunPipeline = () => {
+    if (!engine.isConnected) return;
+    // Start training with current config
+    engine.startTraining({
+      base_model: trainConfig.baseModel,
+      strategy: trainConfig.strategy,
+      quantization: trainConfig.quantization,
+      epochs: trainConfig.epochs,
+      batch_size: trainConfig.batchSize,
+      learning_rate: trainConfig.learningRate,
+    });
+    setActiveTab('train');
   };
 
   return (
@@ -77,12 +108,24 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
         </span>
       </div>
 
-      {/* Project Name */}
-      <div className="flex items-center gap-1.5 px-4 border-r h-full cursor-pointer hover:bg-[var(--bg-surface)] transition-colors" style={{ borderColor: 'var(--border-panel)' }}>
-        <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-          medical-knowledge-base
-        </span>
-        <ChevronDown className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
+      {/* Editable Project Name */}
+      <div className="flex items-center gap-1.5 px-4 border-r h-full cursor-pointer hover:bg-[var(--bg-surface)] transition-colors" style={{ borderColor: 'var(--border-panel)' }} onClick={() => setEditingName(true)}>
+        {editingName ? (
+          <input
+            autoFocus
+            value={projectName}
+            onChange={e => setProjectName(e.target.value)}
+            onBlur={() => setEditingName(false)}
+            onKeyDown={e => e.key === 'Enter' && setEditingName(false)}
+            className="text-xs font-medium bg-transparent border-none outline-none w-40"
+            style={{ color: 'var(--text-primary)' }}
+          />
+        ) : (
+          <>
+            <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{projectName}</span>
+            <ChevronDown className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
+          </>
+        )}
       </div>
 
       {/* Workspace Tabs */}
@@ -105,8 +148,10 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
       <div className="flex items-center gap-1 px-3 h-full">
         {/* Status */}
         <div className="flex items-center gap-1.5 mr-3">
-          <div className="w-2 h-2 rounded-full live-dot" style={{ background: 'var(--success)' }} />
-          <span className="text-xs font-mono" style={{ color: 'var(--success)' }}>Ready</span>
+          <div className="w-2 h-2 rounded-full live-dot" style={{ background: engine.isConnected ? 'var(--success)' : 'var(--error)' }} />
+          <span className="text-xs font-mono" style={{ color: engine.isConnected ? 'var(--success)' : 'var(--error)' }}>
+            {engine.isConnected ? 'Ready' : 'Offline'}
+          </span>
         </div>
 
         {/* Update Checker Button */}
@@ -122,8 +167,8 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
           <Download className={`w-3.5 h-3.5 ${updateStatus === 'checking' ? 'animate-pulse' : ''}`} />
           <span className="hidden lg:inline">
             {updateStatus === 'checking' ? 'Checking...' :
-             updateStatus === 'available' ? 'Update Available!' :
-             updateStatus === 'updated' ? 'Up to date' : 'Check Updates'}
+             updateStatus === 'available' ? 'Update!' :
+             updateStatus === 'updated' ? 'Up to date' : 'Updates'}
           </span>
         </button>
 
@@ -140,11 +185,21 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
           <span className="hidden lg:inline">Network</span>
         </button>
 
-        <button className="p-1.5 rounded hover:bg-[var(--bg-surface)] transition-colors" title="Run Pipeline">
+        <button
+          onClick={handleRunPipeline}
+          className="p-1.5 rounded hover:bg-[var(--bg-surface)] transition-colors"
+          title="Run Training Pipeline"
+          disabled={!engine.isConnected}
+          style={{ opacity: engine.isConnected ? 1 : 0.5 }}
+        >
           <Play className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
         </button>
-        <button className="p-1.5 rounded hover:bg-[var(--bg-surface)] transition-colors" title="Save">
-          <Save className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
+        <button
+          onClick={handleSave}
+          className="p-1.5 rounded hover:bg-[var(--bg-surface)] transition-colors"
+          title={saved ? "Saved!" : "Save Project"}
+        >
+          <Save className="w-3.5 h-3.5" style={{ color: saved ? 'var(--success)' : 'var(--text-secondary)' }} />
         </button>
         <button className="p-1.5 rounded hover:bg-[var(--bg-surface)] transition-colors" title="Settings">
           <Settings className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
