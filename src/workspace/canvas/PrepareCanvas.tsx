@@ -1,27 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import type { LocalFile } from '../FileExplorer';
 
-const SAMPLE_TEXT = `The efficacy of novel CRISPR-Cas9 gene editing techniques in treating hereditary
-cardiomyopathy has been demonstrated in recent clinical trials. Participants showed
-significant improvement in left ventricular ejection fraction (LVEF) after a single
-dose of the AAV-delivered construct. The study, conducted across 12 medical centers,
-enrolled 340 patients with confirmed pathogenic variants in MYH7 and MYBPC3 genes.
-Follow-up assessments at 6, 12, and 24 months revealed sustained therapeutic benefit
-with minimal adverse events. Notably, immune responses to the viral vector were
-manageable with standard immunosuppressive protocols.`;
+interface PrepareCanvasProps {
+  files?: LocalFile[];
+}
 
-export default function PrepareCanvas() {
+export default function PrepareCanvas({ files = [] }: PrepareCanvasProps) {
   const [chunkSize, setChunkSize] = useState(512);
   const [overlap, setOverlap] = useState(64);
+  const [realText, setRealText] = useState('Please upload a text, csv, or json file in the Data tab to preview chunking.');
 
-  // Mock chunk calculation
-  const words = SAMPLE_TEXT.split(/\s+/);
-  const chunkWords = Math.floor(chunkSize / 5); // rough: 5 chars per token
+  useEffect(() => {
+    const textFile = files.find(f => ['txt', 'csv', 'json', 'pdf', 'docx'].includes(f.type));
+    if (textFile?.fileObj) {
+      textFile.fileObj.text().then(text => setRealText(text.slice(0, 15000))); // limit to 15k chars for preview
+    } else if (files.length > 0) {
+      setRealText('No supported text files found payload. Try uploading a .txt or .csv');
+    }
+  }, [files]);
+
+  // Real chunk calculation on the actual text
+  const words = realText.split(/\s+/).filter(w => w.length > 0);
+  const chunkWords = Math.floor(chunkSize / 5); // rough approximation: 5 chars per token
   const overlapWords = Math.floor(overlap / 5);
   const chunks: string[] = [];
-  let i = 0;
-  while (i < words.length) {
-    chunks.push(words.slice(i, i + chunkWords).join(' '));
-    i += Math.max(1, chunkWords - overlapWords);
+  
+  if (words.length > 0 && !realText.startsWith('Please upload') && !realText.startsWith('No supported')) {
+    let i = 0;
+    while (i < words.length) {
+      chunks.push(words.slice(i, i + chunkWords).join(' '));
+      i += Math.max(1, chunkWords - overlapWords);
+    }
   }
 
   const COLORS = [
@@ -47,8 +56,8 @@ export default function PrepareCanvas() {
           <span className="text-xs font-mono w-10 text-right" style={{ color: 'var(--accent)' }}>{overlap}</span>
         </div>
         <div className="ml-auto flex items-center gap-4 text-xs font-mono">
-          <span style={{ color: 'var(--text-muted)' }}>Chunks: <span style={{ color: 'var(--text-primary)' }}>{chunks.length}</span></span>
-          <span style={{ color: 'var(--text-muted)' }}>Tokens: <span style={{ color: 'var(--accent)' }}>~{(chunks.length * chunkSize).toLocaleString()}</span></span>
+          <span style={{ color: 'var(--text-muted)' }}>Preview Chunks: <span style={{ color: 'var(--text-primary)' }}>{chunks.length}</span></span>
+          <span style={{ color: 'var(--text-muted)' }}>Preview Tokens: <span style={{ color: 'var(--accent)' }}>~{(chunks.length * chunkSize).toLocaleString()}</span></span>
         </div>
       </div>
 
@@ -57,11 +66,11 @@ export default function PrepareCanvas() {
         {/* Original Text */}
         <div className="border-r overflow-y-auto" style={{ borderColor: 'var(--border-panel)' }}>
           <div className="p-2 border-b sticky top-0" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-panel)' }}>
-            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Original</span>
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Original Document Preview</span>
           </div>
           <div className="p-4">
-            <p className="text-sm leading-relaxed font-mono" style={{ color: 'var(--text-secondary)' }}>
-              {SAMPLE_TEXT}
+            <p className="text-sm leading-relaxed font-mono whitespace-pre-wrap" style={{ color: 'var(--text-secondary)' }}>
+              {realText}
             </p>
           </div>
         </div>
@@ -69,30 +78,34 @@ export default function PrepareCanvas() {
         {/* Chunked View */}
         <div className="overflow-y-auto">
           <div className="p-2 border-b sticky top-0" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-panel)' }}>
-            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Chunks</span>
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Chunk Strategy Preview</span>
           </div>
           <div className="p-4 space-y-2">
-            {chunks.map((chunk, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-lg border text-sm font-mono leading-relaxed"
-                style={{
-                  background: COLORS[idx % COLORS.length],
-                  borderColor: 'var(--border-subtle)',
-                  color: 'var(--text-secondary)',
-                }}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                    Chunk {idx + 1}
-                  </span>
-                  <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>
-                    ~{chunk.split(/\s+/).length * 5} tokens
-                  </span>
+            {chunks.length === 0 ? (
+               <div className="text-sm" style={{ color: 'var(--text-muted)' }}>No chunks generated yet.</div>
+            ) : (
+              chunks.map((chunk, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 rounded-lg border text-sm font-mono leading-relaxed whitespace-pre-wrap"
+                  style={{
+                    background: COLORS[idx % COLORS.length],
+                    borderColor: 'var(--border-subtle)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+                      Chunk {idx + 1}
+                    </span>
+                    <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>
+                      ~{Math.round(chunk.split(/\s+/).length * 1.3)} tokens
+                    </span>
+                  </div>
+                  {chunk}
                 </div>
-                {chunk}
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

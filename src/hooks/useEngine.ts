@@ -118,6 +118,18 @@ export function useEngine() {
     }
   }, []);
 
+  const exportModel = useCallback((config: { format: string, output_path: string }) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        command: 'export_model',
+        config
+      }));
+      setStatusMessage(`Exporting model as ${config.format.toUpperCase()}...`);
+    } else {
+      setStatusMessage("Error: Engine not connected.");
+    }
+  }, []);
+
   return {
     isConnected,
     hardware,
@@ -125,6 +137,7 @@ export function useEngine() {
     statusMessage,
     isTraining,
     startTraining,
-    stopTraining
+    stopTraining,
+    exportModel
   };
 }

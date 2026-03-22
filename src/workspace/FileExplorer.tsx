@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useRef } from 'react';
 import {
   FileText, FileSpreadsheet, FileImage, FileAudio, Globe,
   ChevronRight, ChevronDown, FolderOpen, Plus, Search, Trash2
@@ -6,6 +6,8 @@ import {
 import type { WorkspaceTab } from '../App';
 
 interface FileExplorerProps {
+  files: LocalFile[];
+  setFiles: React.Dispatch<React.SetStateAction<LocalFile[]>>;
   selectedFile: string | null;
   setSelectedFile: (file: string | null) => void;
   activeTab: WorkspaceTab;
@@ -32,8 +34,7 @@ const FILE_ICONS: Record<string, typeof FileText> = {
   url: Globe,
 };
 
-export default function FileExplorer({ selectedFile, setSelectedFile }: FileExplorerProps) {
-  const [files, setFiles] = useState<LocalFile[]>([]);
+export default function FileExplorer({ files, setFiles, selectedFile, setSelectedFile }: FileExplorerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const formatSize = (bytes: number) => {

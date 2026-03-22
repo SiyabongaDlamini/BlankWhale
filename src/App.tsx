@@ -2,7 +2,7 @@ import { useState } from 'react';
 import './App.css';
 
 import TopBar from './workspace/TopBar';
-import FileExplorer, { LocalFile } from './workspace/FileExplorer';
+import FileExplorer, { type LocalFile } from './workspace/FileExplorer';
 import Inspector from './workspace/Inspector';
 import ConsolePanel from './workspace/ConsolePanel';
 import DataCanvas from './workspace/canvas/DataCanvas';
@@ -29,9 +29,9 @@ function App() {
   const renderCanvas = () => {
     switch (activeTab) {
       case 'data': return <DataCanvas files={files} setFiles={setFiles} selectedFile={selectedFile} setSelectedFile={setSelectedFile} />;
-      case 'prepare': return <PrepareCanvas />;
+      case 'prepare': return <PrepareCanvas files={files} />;
       case 'train': return <TrainCanvas />;
-      case 'evaluate': return <EvaluateCanvas />;
+      case 'evaluate': return <EvaluateCanvas files={files} />;
       case 'deploy': return <DeployCanvas />;
       case 'code': return <CodeCanvas />;
     }

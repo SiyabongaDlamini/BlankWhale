@@ -1,32 +1,39 @@
 import { useState } from 'react';
-import { Copy, Check, Globe, Code2, MessageSquare, Smartphone } from 'lucide-react';
+import { Copy, Check, Globe, Code2, MessageSquare, Smartphone, Download, Loader2 } from 'lucide-react';
+import { useEngine } from '../../hooks/useEngine';
 
 export default function DeployCanvas() {
   const [copied, setCopied] = useState<string | null>(null);
+  const [exportingAs, setExportingAs] = useState<string | null>(null);
+  
+  const { metrics, statusMessage, exportModel } = useEngine();
+  const isTrained = metrics.length > 0;
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text).catch(() => {});
     setCopied(id);
     setTimeout(() => setCopied(null), 2000);
   };
+  
+  const handleExport = (format: string) => {
+    if (!isTrained) return;
+    setExportingAs(format);
+    exportModel({ format, output_path: `./output/export_${format}` });
+    setTimeout(() => setExportingAs(null), 3500); // Simulate export UX reset
+  };
 
-  const apiEndpoint = 'https://api.blankwhale.ai/v1/models/medical-kb/chat';
+  const apiEndpoint = 'http://localhost:9876/v1/chat/completions';
   const curlExample = `curl -X POST ${apiEndpoint} \\
-  -H "Authorization: Bearer bw_sk_..." \\
   -H "Content-Type: application/json" \\
   -d '{"messages": [{"role": "user", "content": "What is CRISPR?"}]}'`;
 
-  const embedCode = `<script src="https://cdn.blankwhale.ai/widget.js"></script>
-<script>
-  BlankWhale.init({
-    model: "medical-kb",
-    theme: "light",
-    position: "bottom-right"
-  });
-</script>`;
-
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
+      {!isTrained && (
+         <div className="p-3 rounded border border-amber-200 bg-amber-50 text-amber-800 text-xs mb-4">
+           You have not completed a training run yet. Some deployment features require a trained model.
+         </div>
+      )}
       <div className="grid grid-cols-2 gap-4">
         {/* API Endpoint */}
         <div className="rounded-lg p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}>
@@ -34,8 +41,8 @@ export default function DeployCanvas() {
             <div className="p-1.5 rounded" style={{ background: 'rgba(0, 113, 227, 0.08)' }}>
               <Code2 className="w-4 h-4" style={{ color: 'var(--accent)' }} />
             </div>
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>REST API</h3>
-            <span className="ml-auto badge badge-green">Live</span>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Local REST API</h3>
+            <span className="ml-auto badge badge-green">Ready</span>
           </div>
 
           <div className="space-y-3">
@@ -78,23 +85,16 @@ export default function DeployCanvas() {
             <div className="p-1.5 rounded" style={{ background: 'rgba(99, 102, 241, 0.08)' }}>
               <MessageSquare className="w-4 h-4 text-indigo-500" />
             </div>
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Chat Widget</h3>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Integrations</h3>
           </div>
 
           <div>
-            <label className="ctrl-label">Embed Code</label>
-            <div className="relative">
-              <pre
-                className="text-xs font-mono p-3 rounded overflow-x-auto leading-relaxed"
-                style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)' }}
-              >
-                {embedCode}
-              </pre>
-              <button
-                onClick={() => handleCopy('embed', embedCode)}
-                className="absolute top-2 right-2 p-1 rounded hover:bg-[var(--bg-elevated)]"
-              >
-                {copied === 'embed' ? <Check className="w-3 h-3" style={{ color: 'var(--success)' }} /> : <Copy className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />}
+             <div className="space-y-2 mb-4">
+              <button disabled className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer disabled:opacity-50">
+                Generate Vercel AI SDK snippet
+              </button>
+              <button disabled className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer disabled:opacity-50">
+                Generate LangChain setup
               </button>
             </div>
           </div>
@@ -106,17 +106,30 @@ export default function DeployCanvas() {
             <div className="p-1.5 rounded" style={{ background: 'rgba(40, 167, 69, 0.08)' }}>
               <Globe className="w-4 h-4" style={{ color: 'var(--success)' }} />
             </div>
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Model Weights</h3>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Export Model Weights</h3>
           </div>
-          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Download the fine-tuned adapter weights for local inference.</p>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Export your fine-tuned weights for external inference engines.</p>
           <div className="space-y-2">
-            <button className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer">
-              LoRA Adapter (GGUF) — 245 MB
+            <button 
+               onClick={() => handleExport('gguf')}
+               disabled={!isTrained || exportingAs !== null}
+               className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer disabled:opacity-50 flex items-center justify-between"
+            >
+              <span>{exportingAs === 'gguf' ? 'Exporting...' : 'Export to GGUF (Ollama, llama.cpp)'}</span>
+              {exportingAs === 'gguf' ? <Loader2 className="w-3 h-3 animate-spin"/> : <Download className="w-3 h-3" />}
             </button>
-            <button className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer">
-              Full Merged Model — 4.7 GB
+            <button 
+               onClick={() => handleExport('safetensors')}
+               disabled={!isTrained || exportingAs !== null}
+               className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer disabled:opacity-50 flex items-center justify-between"
+            >
+              <span>{exportingAs === 'safetensors' ? 'Exporting...' : 'Export to SafeTensors (vLLM)'}</span>
+              {exportingAs === 'safetensors' ? <Loader2 className="w-3 h-3 animate-spin"/> : <Download className="w-3 h-3" />}
             </button>
           </div>
+          {statusMessage.includes('Export') && (
+            <p className="text-xs mt-3 text-blue-500 font-medium">{statusMessage}</p>
+          )}
         </div>
 
         {/* Mobile SDK */}
@@ -125,35 +138,17 @@ export default function DeployCanvas() {
             <div className="p-1.5 rounded" style={{ background: 'rgba(232, 163, 23, 0.08)' }}>
               <Smartphone className="w-4 h-4" style={{ color: 'var(--warning)' }} />
             </div>
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Mobile SDK</h3>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Mobile CoreML</h3>
           </div>
-          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>iOS and Android integration packages.</p>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Export for on-device iOS / Android execution.</p>
           <div className="space-y-2">
-            <button className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer">
-              Swift Package — v2.0.1
+            <button disabled className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer disabled:opacity-50">
+              Export to CoreML (Apple Neural Engine)
             </button>
-            <button className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer">
-              Kotlin SDK — v2.0.1
+            <button disabled className="w-full ctrl-input text-xs text-left hover:border-[var(--accent)] cursor-pointer disabled:opacity-50">
+              Export to ONNX (Android / Web)
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Usage Stats */}
-      <div className="rounded-lg p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-panel)' }}>
-        <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Usage (Last 24h)</h3>
-        <div className="grid grid-cols-4 gap-4">
-          {[
-            { label: 'Requests', value: '1,284' },
-            { label: 'Avg Latency', value: '120ms' },
-            { label: 'Tokens Served', value: '2.4M' },
-            { label: 'Errors', value: '0' },
-          ].map(s => (
-            <div key={s.label} className="stat-card">
-              <div className="stat-label">{s.label}</div>
-              <div className="stat-value text-sm">{s.value}</div>
-            </div>
-          ))}
         </div>
       </div>
     </div>
