@@ -2,7 +2,7 @@ import { useState } from 'react';
 import './App.css';
 
 import TopBar from './workspace/TopBar';
-import FileExplorer from './workspace/FileExplorer';
+import FileExplorer, { LocalFile } from './workspace/FileExplorer';
 import Inspector from './workspace/Inspector';
 import ConsolePanel from './workspace/ConsolePanel';
 import DataCanvas from './workspace/canvas/DataCanvas';
@@ -17,7 +17,8 @@ export type WorkspaceTab = 'data' | 'prepare' | 'train' | 'evaluate' | 'deploy' 
 
 function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('data');
-  const [selectedFile, setSelectedFile] = useState<string | null>('medical_notes.pdf');
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [files, setFiles] = useState<LocalFile[]>([]);
   const [showNetwork, setShowNetwork] = useState(false);
 
   // Panel widths (in px) and bottom panel height
@@ -27,7 +28,7 @@ function App() {
 
   const renderCanvas = () => {
     switch (activeTab) {
-      case 'data': return <DataCanvas selectedFile={selectedFile} setSelectedFile={setSelectedFile} />;
+      case 'data': return <DataCanvas files={files} setFiles={setFiles} selectedFile={selectedFile} setSelectedFile={setSelectedFile} />;
       case 'prepare': return <PrepareCanvas />;
       case 'train': return <TrainCanvas />;
       case 'evaluate': return <EvaluateCanvas />;
@@ -47,7 +48,7 @@ function App() {
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Left Panel — File Explorer */}
           <div style={{ width: leftWidth, minWidth: 140, maxWidth: 400 }} className="flex-shrink-0 border-r overflow-hidden" >
-            <FileExplorer selectedFile={selectedFile} setSelectedFile={setSelectedFile} activeTab={activeTab} />
+            <FileExplorer files={files} setFiles={setFiles} selectedFile={selectedFile} setSelectedFile={setSelectedFile} activeTab={activeTab} />
           </div>
 
           {/* Left Resize Handle */}
@@ -63,7 +64,7 @@ function App() {
 
           {/* Right Panel — Inspector */}
           <div style={{ width: rightWidth, minWidth: 180, maxWidth: 450 }} className="flex-shrink-0 border-l overflow-hidden">
-            <Inspector activeTab={activeTab} selectedFile={selectedFile} />
+            <Inspector activeTab={activeTab} selectedFile={selectedFile} files={files} />
           </div>
         </div>
 

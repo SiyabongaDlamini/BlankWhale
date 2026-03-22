@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import type { WorkspaceTab } from '../App';
+import type { LocalFile } from './FileExplorer';
 
 interface InspectorProps {
   activeTab: WorkspaceTab;
   selectedFile: string | null;
+  files?: LocalFile[];
 }
 
-export default function Inspector({ activeTab, selectedFile }: InspectorProps) {
+export default function Inspector({ activeTab, selectedFile, files = [] }: InspectorProps) {
   const [epochs, setEpochs] = useState(5);
   const [lr, setLr] = useState(0.0003);
   const [batchSize, setBatchSize] = useState(16);
+
+  const fileMeta = files.find(f => f.name === selectedFile);
 
   return (
     <div className="h-full flex flex-col panel">
@@ -18,25 +22,24 @@ export default function Inspector({ activeTab, selectedFile }: InspectorProps) {
       </div>
 
       <div className="panel-body flex-1 space-y-4">
-        {activeTab === 'data' && selectedFile && (
+        {activeTab === 'data' && selectedFile && fileMeta && (
           <>
             <Section title="File Info">
-              <PropRow label="Name" value={selectedFile} />
-              <PropRow label="Type" value="PDF Document" />
-              <PropRow label="Size" value="2.4 MB" />
+              <PropRow label="Name" value={fileMeta.name} />
+              <PropRow label="Type" value={fileMeta.type.toUpperCase()} />
+              <PropRow label="Size" value={fileMeta.size} />
               <PropRow label="Encoding" value="UTF-8" />
-              <PropRow label="Language" value="English" badge="auto" />
+              <PropRow label="Language" value="auto" badge="auto" />
             </Section>
             <Section title="Processing">
-              <PropRow label="Status" value="Ready" badgeColor="green" />
-              <PropRow label="Tokens" value="18,432" mono />
-              <PropRow label="Chunks" value="37" mono />
+              <PropRow label="Status" value={fileMeta.status} badgeColor={fileMeta.status === 'ready' ? 'green' : 'amber'} />
+              <PropRow label="Tokens" value="—" mono />
+              <PropRow label="Chunks" value="—" mono />
               <PropRow label="Duplicates" value="0 found" />
             </Section>
             <Section title="Auto Cleaning">
               <PropRow label="Encoding Fix" value="Applied" badgeColor="green" />
               <PropRow label="Whitespace" value="Normalized" badgeColor="green" />
-              <PropRow label="Broken Text" value="2 fixed" badgeColor="amber" />
             </Section>
           </>
         )}

@@ -1,4 +1,4 @@
-import { Waves, Save, Settings, Play, ChevronDown, Download, Share2 } from 'lucide-react';
+import { Save, Settings, Play, ChevronDown, Download, Share2 } from 'lucide-react';
 import type { WorkspaceTab } from '../App';
 
 interface TopBarProps {
@@ -25,9 +25,7 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
     >
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 border-r h-full" style={{ borderColor: 'var(--border-panel)' }}>
-        <div className="w-6 h-6 rounded bg-[#1a1a1f] flex items-center justify-center">
-          <Waves className="w-4 h-4 text-white" />
-        </div>
+        <img src="/whale-logo.png" alt="Logo" className="w-6 h-6 object-contain drop-shadow-sm" />
         <span className="font-heading text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
           BlankWhale
         </span>
