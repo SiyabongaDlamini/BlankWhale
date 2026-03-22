@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react';
 import { Save, Settings, Play, ChevronDown, Download, Share2 } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-shell';
 import type { WorkspaceTab } from '../App';
 
 interface TopBarProps {
@@ -18,6 +20,50 @@ const TABS: { id: WorkspaceTab; label: string }[] = [
 ];
 
 export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNetwork }: TopBarProps) {
+  const [updateStatus, setUpdateStatus] = useState<'checking' | 'available' | 'updated' | 'error'>('checking');
+  const [latestUrl, setLatestUrl] = useState('https://github.com/SiyabongaDlamini/BlankWhale/releases/latest');
+
+  useEffect(() => {
+    fetch('https://api.github.com/repos/SiyabongaDlamini/BlankWhale/releases/latest')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.tag_name) {
+          const currentVersion = 'v0.1.1';
+          if (data.tag_name !== currentVersion && data.tag_name > currentVersion) {
+            setUpdateStatus('available');
+            setLatestUrl(data.html_url);
+          } else {
+            // Either up to date, or ahead of tag
+            setUpdateStatus('updated');
+          }
+        } else {
+          setUpdateStatus('updated'); // default fallback if no releases
+        }
+      })
+      .catch(() => setUpdateStatus('error'));
+  }, []);
+
+  const handleUpdateClick = () => {
+    if (updateStatus === 'available') {
+      open(latestUrl);
+    } else if (updateStatus !== 'checking') {
+      // Force a manual re-check
+      setUpdateStatus('checking');
+      fetch('https://api.github.com/repos/SiyabongaDlamini/BlankWhale/releases/latest')
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.tag_name && data.tag_name > 'v0.1.1') {
+            setUpdateStatus('available');
+            setLatestUrl(data.html_url);
+            open(data.html_url);
+          } else {
+            setUpdateStatus('updated');
+          }
+        })
+        .catch(() => setUpdateStatus('error'));
+    }
+  };
+
   return (
     <div
       className="flex items-center h-10 border-b select-none flex-shrink-0"
@@ -63,14 +109,22 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
           <span className="text-xs font-mono" style={{ color: 'var(--success)' }}>Ready</span>
         </div>
 
-        {/* Download Button */}
+        {/* Update Checker Button */}
         <button
+          onClick={handleUpdateClick}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors hover:bg-[var(--bg-surface)] border mr-1"
-          style={{ borderColor: 'var(--border-panel)', color: 'var(--text-secondary)' }}
-          title="Download BlankWhale for your device"
+          style={{ 
+             borderColor: updateStatus === 'available' ? 'var(--accent)' : 'var(--border-panel)', 
+             color: updateStatus === 'available' ? 'var(--accent)' : 'var(--text-secondary)' 
+          }}
+          title={updateStatus === 'available' ? 'Click to download new update' : 'Check for Updates'}
         >
-          <Download className="w-3.5 h-3.5" />
-          <span className="hidden lg:inline">Download</span>
+          <Download className={`w-3.5 h-3.5 ${updateStatus === 'checking' ? 'animate-pulse' : ''}`} />
+          <span className="hidden lg:inline">
+            {updateStatus === 'checking' ? 'Checking...' :
+             updateStatus === 'available' ? 'Update Available!' :
+             updateStatus === 'updated' ? 'Up to date' : 'Check Updates'}
+          </span>
         </button>
 
         {/* Network Visualization Button */}

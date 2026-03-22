@@ -1,6 +1,6 @@
 [package]
 name = "blankwhale"
-version = "0.1.0"
+version = "0.1.1"
 description = "BlankWhale — Open-source AI Training Studio"
 authors = ["BlankWhale Team"]
 license = "MIT"
