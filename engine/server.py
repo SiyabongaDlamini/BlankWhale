@@ -26,6 +26,7 @@ class MetricsServer:
         self._server = None
         self._model = None
         self._tokenizer = None
+        self._loop = None  # Will be set when server starts
 
     async def handler(self, websocket):
         """Handle a new WebSocket connection."""
@@ -111,10 +112,11 @@ class MetricsServer:
 
         def on_metrics(metrics):
             """Broadcast metrics to all connected clients."""
-            asyncio.run_coroutine_threadsafe(
-                self._broadcast(json.dumps(metrics)),
-                asyncio.get_event_loop(),
-            )
+            if self._loop:
+                asyncio.run_coroutine_threadsafe(
+                    self._broadcast(json.dumps(metrics)),
+                    self._loop,
+                )
 
         self.trainer = BlankWhaleTrainer(training_config, on_metrics=on_metrics)
 
@@ -267,6 +269,7 @@ class MetricsServer:
             return
 
         logger.info(f"BlankWhale engine starting on ws://{self.host}:{self.port}")
+        self._loop = asyncio.get_running_loop()
         self._server = await websockets.serve(self.handler, self.host, self.port)
         logger.info("Engine ready. Waiting for connections...")
         await self._server.wait_closed()

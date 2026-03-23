@@ -22,41 +22,82 @@ class DataConfig:
 
 
 def load_pdf(path: Path) -> str:
-    """Extract text from PDF using PyMuPDF."""
+    """Extract and clean text from PDF using PyMuPDF."""
     try:
         import fitz  # PyMuPDF
     except ImportError:
         raise ImportError("PyMuPDF not found. Install with: pip install pymupdf")
 
     doc = fitz.open(path)
-    text = ""
+    text_blocks = []
     for page in doc:
-        # Extract text with layout preservation
-        text += page.get_text("text") + "\n"
+        # Extract text as blocks to better preserve structure
+        blocks = page.get_text("blocks")
+        for b in blocks:
+            # b[4] is the text content of the block
+            block_text = b[4].strip()
+            if block_text:
+                text_blocks.append(block_text)
     doc.close()
-    return text
+    
+    # Join blocks and normalize whitespace
+    combined_text = "\n\n".join(text_blocks)
+    import re
+    # Remove multiple spaces and normalize newlines
+    combined_text = re.sub(r' +', ' ', combined_text)
+    combined_text = re.sub(r'\n{3,}', '\n\n', combined_text)
+    
+    return combined_text.strip()
 
 
 def chunk_text(text: str, chunk_size: int = 1024, overlap: int = 200) -> list[str]:
     """
-    Split text into overlapping chunks.
-    Note: Using characters as proxy for tokens here, but can be refined with tokenizer.
+    Split text into overlapping chunks, attempting to keep paragraphs together.
     """
-    if len(text) <= chunk_size:
-        return [text]
+    if not text or len(text) <= chunk_size:
+        return [text] if text else []
 
+    # Try to split by double newlines (paragraphs) first
+    paragraphs = text.split("\n\n")
     chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += (chunk_size - overlap)
-        
-        # Avoid tiny tail chunks
-        if len(text) - start < overlap:
-            break
+    current_chunk = ""
+
+    for p in paragraphs:
+        p = p.strip()
+        if not p:
+            continue
             
-    return chunks
+        # If adding this paragraph exceeds chunk_size, save current_chunk
+        if current_chunk and len(current_chunk) + len(p) > chunk_size:
+            chunks.append(current_chunk.strip())
+            # Start new chunk with some overlap if possible
+            overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
+            current_chunk = overlap_text + "\n\n" + p
+        else:
+            if current_chunk:
+                current_chunk += "\n\n" + p
+            else:
+                current_chunk = p
+                
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+
+    # If any chunk is still too large (e.g. one giant paragraph), handle it with hard splits
+    final_chunks = []
+    for c in chunks:
+        if len(c) > chunk_size + overlap:
+            # Fallback to character-based split for huge blocks
+            sub_start = 0
+            while sub_start < len(c):
+                sub_end = sub_start + chunk_size
+                final_chunks.append(c[sub_start:sub_end])
+                sub_start += (chunk_size - overlap)
+                if len(c) - sub_start < overlap:
+                    break
+        else:
+            final_chunks.append(c)
+
+    return final_chunks
 
 
 def load_raw_data(path: str, chunk_size: int = 4000, overlap: int = 400) -> list[dict]:
