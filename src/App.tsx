@@ -54,7 +54,7 @@ function App() {
   const renderCanvas = () => {
     switch (activeTab) {
       case 'data': return <DataCanvas files={files} setFiles={setFiles} selectedFile={selectedFile} setSelectedFile={setSelectedFile} engine={engine} />;
-      case 'prepare': return <PrepareCanvas files={files} />;
+      case 'prepare': return <PrepareCanvas files={files} engine={engine} />;
       case 'train': return <TrainCanvas engine={engine} trainConfig={trainConfig} />;
       case 'evaluate': return <EvaluateCanvas files={files} engine={engine} />;
       case 'deploy': return <DeployCanvas engine={engine} />;

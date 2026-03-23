@@ -1,37 +1,29 @@
 import { useState, useEffect } from 'react';
 import type { LocalFile } from '../FileExplorer';
 
-interface PrepareCanvasProps {
-  files?: LocalFile[];
-}
 
-export default function PrepareCanvas({ files = [] }: PrepareCanvasProps) {
+export default function PrepareCanvas({ files = [], engine }: { files?: LocalFile[], engine: any }) {
   const [chunkSize, setChunkSize] = useState(512);
   const [overlap, setOverlap] = useState(64);
-  const [realText, setRealText] = useState('Please upload a text, csv, or json file in the Data tab to preview chunking.');
+  const [realText, setRealText] = useState('Please select a file on the left to preview its extracted text.');
+  const [previewChunks, setPreviewChunks] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const textFile = files.find(f => ['txt', 'csv', 'json', 'pdf', 'docx'].includes(f.type));
-    if (textFile?.fileObj) {
-      textFile.fileObj.text().then(text => setRealText(text.slice(0, 15000))); // limit to 15k chars for preview
-    } else if (files.length > 0) {
-      setRealText('No supported text files found payload. Try uploading a .txt or .csv');
+    const textFile = files.find(f => ['txt', 'csv', 'json', 'pdf'].includes(f.type));
+    if (textFile && engine.isConnected) {
+      setLoading(true);
+      const path = textFile.name.includes('/') ? textFile.name : `./data/${textFile.name}`;
+      
+      engine.previewData(path, { chunk_size: chunkSize, overlap: overlap }, (result: any) => {
+        if (result.chunks && result.chunks.length > 0) {
+          setRealText(result.chunks.join('\n\n'));
+          setPreviewChunks(result.chunks);
+        }
+        setLoading(false);
+      });
     }
-  }, [files]);
-
-  // Real chunk calculation on the actual text
-  const words = realText.split(/\s+/).filter(w => w.length > 0);
-  const chunkWords = Math.floor(chunkSize / 5); // rough approximation: 5 chars per token
-  const overlapWords = Math.floor(overlap / 5);
-  const chunks: string[] = [];
-  
-  if (words.length > 0 && !realText.startsWith('Please upload') && !realText.startsWith('No supported')) {
-    let i = 0;
-    while (i < words.length) {
-      chunks.push(words.slice(i, i + chunkWords).join(' '));
-      i += Math.max(1, chunkWords - overlapWords);
-    }
-  }
+  }, [files, engine.isConnected, chunkSize, overlap]);
 
   const COLORS = [
     'rgba(34, 211, 238, 0.15)',
@@ -42,7 +34,7 @@ export default function PrepareCanvas({ files = [] }: PrepareCanvasProps) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className={`h-full flex flex-col overflow-hidden ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
       {/* Controls Bar */}
       <div className="flex items-center gap-6 p-3 border-b flex-shrink-0" style={{ background: 'var(--bg-panel)', borderColor: 'var(--border-panel)' }}>
         <div className="flex items-center gap-3">
@@ -56,8 +48,8 @@ export default function PrepareCanvas({ files = [] }: PrepareCanvasProps) {
           <span className="text-xs font-mono w-10 text-right" style={{ color: 'var(--accent)' }}>{overlap}</span>
         </div>
         <div className="ml-auto flex items-center gap-4 text-xs font-mono">
-          <span style={{ color: 'var(--text-muted)' }}>Preview Chunks: <span style={{ color: 'var(--text-primary)' }}>{chunks.length}</span></span>
-          <span style={{ color: 'var(--text-muted)' }}>Preview Tokens: <span style={{ color: 'var(--accent)' }}>~{(chunks.length * chunkSize).toLocaleString()}</span></span>
+          <span style={{ color: 'var(--text-muted)' }}>Preview Chunks: <span style={{ color: 'var(--text-primary)' }}>{previewChunks.length}</span></span>
+          <span style={{ color: 'var(--text-muted)' }}>Preview Tokens: <span style={{ color: 'var(--accent)' }}>~{(previewChunks.length * chunkSize).toLocaleString()}</span></span>
         </div>
       </div>
 
@@ -81,10 +73,10 @@ export default function PrepareCanvas({ files = [] }: PrepareCanvasProps) {
             <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Chunk Strategy Preview</span>
           </div>
           <div className="p-4 space-y-2">
-            {chunks.length === 0 ? (
+            {previewChunks.length === 0 ? (
                <div className="text-sm" style={{ color: 'var(--text-muted)' }}>No chunks generated yet.</div>
             ) : (
-              chunks.map((chunk, idx) => (
+              previewChunks.map((chunk, idx) => (
                 <div
                   key={idx}
                   className="p-3 rounded-lg border text-sm font-mono leading-relaxed whitespace-pre-wrap"

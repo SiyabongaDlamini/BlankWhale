@@ -46,19 +46,24 @@ def load_model(config: ModelConfig, device: str = "auto"):
     # Quantization config
     quantization_config = None
     if config.strategy in ("qlora", "lora") and config.quantization != "none":
-        try:
-            if config.quantization == "4bit":
-                quantization_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype="float16",
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_use_double_quant=True,
-                )
-            elif config.quantization == "8bit":
-                quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-        except Exception as e:
-            print(f"Warning: Quantization not available ({e}). Loading without quantization.")
+        import torch
+        if not torch.cuda.is_available():
+            print("Warning: CUDA not available. bitsandbytes quantization requires CUDA. Falling back to full precision.")
             quantization_config = None
+        else:
+            try:
+                if config.quantization == "4bit":
+                    quantization_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype="float16",
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_use_double_quant=True,
+                    )
+                elif config.quantization == "8bit":
+                    quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+            except Exception as e:
+                print(f"Warning: Quantization failed ({e}). Loading without quantization.")
+                quantization_config = None
 
     # Load model
     load_kwargs = {

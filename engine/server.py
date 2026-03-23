@@ -92,6 +92,10 @@ class MetricsServer:
                 dataset_config = msg.get("config", {})
                 asyncio.create_task(self._load_hf_dataset(websocket, dataset_config))
 
+            elif command == "preview_data":
+                preview_config = msg.get("config", {})
+                asyncio.create_task(self._preview_data(websocket, preview_config))
+
             else:
                 await websocket.send(json.dumps({
                     "event": "error",
@@ -248,6 +252,38 @@ class MetricsServer:
             await websocket.send(json.dumps({
                 "event": "error",
                 "data": {"message": f"Failed to load dataset: {e}"},
+            }))
+
+    async def _preview_data(self, websocket, config: dict):
+        """Preview data extraction and chunking for the UI."""
+        path = config.get("path", "")
+        chunk_size = config.get("chunk_size", 1024)
+        overlap = config.get("overlap", 200)
+
+        if not path:
+            return
+
+        from .data_pipeline import load_raw_data
+        loop = asyncio.get_event_loop()
+        try:
+            # Use same loader logic as training
+            def load():
+                # Provide a limited preview (first few chunks)
+                data = load_raw_data(path, chunk_size=chunk_size, overlap=overlap)
+                return {
+                    "chunks": [d.get("text", "") for d in data[:10]],
+                    "total_chunks": len(data),
+                }
+
+            result = await loop.run_in_executor(None, load)
+            await websocket.send(json.dumps({
+                "event": "preview_result",
+                "data": result,
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": f"Preview failed: {e}"},
             }))
 
     async def _broadcast(self, message: str):

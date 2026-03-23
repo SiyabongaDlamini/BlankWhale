@@ -151,6 +151,32 @@ export function useEngine() {
     }
   }, []);
 
+  const previewData = useCallback((path: string, options?: { chunk_size?: number, overlap?: number }, onResult?: (data: any) => void) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      // Store temp listener for this one-off request
+      const originalOnMessage = wsRef.current.onmessage;
+      wsRef.current.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.event === 'preview_result') {
+            if (onResult) onResult(msg.data);
+            if (wsRef.current) wsRef.current.onmessage = originalOnMessage;
+          } else {
+             // Fallback to original for others
+             if (originalOnMessage && wsRef.current) originalOnMessage.call(wsRef.current, e);
+          }
+        } catch (err) {
+           if (originalOnMessage && wsRef.current) originalOnMessage.call(wsRef.current, e);
+        }
+      };
+      
+      wsRef.current.send(JSON.stringify({ 
+        command: 'preview_data', 
+        config: { path, ...options } 
+      }));
+    }
+  }, []);
+
   return {
     isConnected,
     hardware,
@@ -162,5 +188,6 @@ export function useEngine() {
     exportModel,
     runInference,
     loadHfDataset,
+    previewData,
   };
 }
