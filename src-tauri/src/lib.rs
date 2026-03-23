@@ -49,23 +49,58 @@ fn get_system_info() -> SystemInfo {
     }
 }
 
-/// Try to find a working python command (python3 first, then python).
-fn find_python() -> String {
-    if Command::new("python3").arg("--version").output().is_ok() {
-        "python3".to_string()
-    } else {
-        "python".to_string()
+/// Try to find a working python command with necessary AI libraries.
+/// macOS GUI apps strip PATH, so we must explicitly check Homebrew/Conda or local venv.
+fn find_python(engine_dir: &std::path::Path) -> String {
+    // 1. Check for local virtual environment (ai_venv)
+    #[cfg(target_os = "windows")]
+    let venv_python = engine_dir.join("engine").join("ai_venv").join("Scripts").join("python.exe");
+    #[cfg(not(target_os = "windows"))]
+    let venv_python = engine_dir.join("engine").join("ai_venv").join("bin").join("python3");
+
+    if venv_python.exists() {
+        return venv_python.to_string_lossy().to_string();
     }
+
+    // 2. Check Homebrew/Conda/System candidates
+    let candidates = [
+        "/opt/homebrew/bin/python3", // Apple Silicon Homebrew
+        "/usr/local/bin/python3",    // Intel Homebrew
+        "/opt/anaconda3/bin/python3",// Conda
+        "python3",                   // Default PATH
+        "/usr/bin/python3",          // System fallback
+    ];
+    for p in candidates.iter() {
+        if Command::new(p).arg("--version").output().is_ok() {
+            return p.to_string();
+        }
+    }
+    "python".to_string()
+}
+
+/// Dynamically find the engine directory by walking up from the executable path.
+/// This allows the .app bundle to find the engine/ folder in the project folder.
+fn find_engine_dir() -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe;
+        while dir.pop() {
+            if dir.join("engine").exists() {
+                return dir;
+            }
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| ".".into())
 }
 
 /// Spawn the Python WebSocket engine as a child process.
 fn spawn_engine() -> Option<Child> {
-    let python = find_python();
-    log::info!("Starting engine with: {} -m engine.server", python);
+    let engine_dir = find_engine_dir();
+    let python = find_python(&engine_dir);
+    log::info!("Starting engine with: {} -m engine.server from {:?}", python, engine_dir);
 
     match Command::new(&python)
         .args(["-m", "engine.server"])
-        .current_dir(std::env::current_dir().unwrap_or_else(|_| ".".into()))
+        .current_dir(engine_dir)
         .spawn()
     {
         Ok(child) => {
@@ -167,4 +202,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running BlankWhale");
 }
-

@@ -1,1 +1,8 @@
 node_modules
+ai_venv
+dist
+__pycache__
+*.pyc
+.temp
+.DS_Store
+src-tauri/target

@@ -21,7 +21,45 @@ class DataConfig:
     validation_split: float = 0.1
 
 
-def load_raw_data(path: str) -> list[dict]:
+def load_pdf(path: Path) -> str:
+    """Extract text from PDF using PyMuPDF."""
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise ImportError("PyMuPDF not found. Install with: pip install pymupdf")
+
+    doc = fitz.open(path)
+    text = ""
+    for page in doc:
+        # Extract text with layout preservation
+        text += page.get_text("text") + "\n"
+    doc.close()
+    return text
+
+
+def chunk_text(text: str, chunk_size: int = 1024, overlap: int = 200) -> list[str]:
+    """
+    Split text into overlapping chunks.
+    Note: Using characters as proxy for tokens here, but can be refined with tokenizer.
+    """
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += (chunk_size - overlap)
+        
+        # Avoid tiny tail chunks
+        if len(text) - start < overlap:
+            break
+            
+    return chunks
+
+
+def load_raw_data(path: str, chunk_size: int = 4000, overlap: int = 400) -> list[dict]:
     """Load raw data from file."""
     p = Path(path)
     if not p.exists():
@@ -51,7 +89,14 @@ def load_raw_data(path: str) -> list[dict]:
 
     elif p.suffix == ".txt":
         with open(p, encoding="utf-8") as f:
-            return [{"text": f.read()}]
+            text = f.read()
+            chunks = chunk_text(text, chunk_size, overlap)
+            return [{"text": c} for c in chunks]
+
+    elif p.suffix == ".pdf":
+        text = load_pdf(p)
+        chunks = chunk_text(text, chunk_size, overlap)
+        return [{"text": c} for c in chunks]
 
     else:
         raise ValueError(f"Unsupported file format: {p.suffix}")
@@ -104,8 +149,12 @@ def preprocess_data(config: DataConfig) -> dict:
         dict with 'train' and optionally 'eval' splits
     """
     print(f"Loading data from {config.train_file}...")
-    raw_data = load_raw_data(config.train_file)
-    print(f"Loaded {len(raw_data)} examples")
+    # Map max_seq_length to rough character chunk size (approx 4 chars/token)
+    chunk_size = config.max_seq_length * 4
+    overlap = int(chunk_size * 0.15)
+    
+    raw_data = load_raw_data(config.train_file, chunk_size=chunk_size, overlap=overlap)
+    print(f"Loaded {len(raw_data)} chunks/examples")
 
     formatter = FORMATTERS.get(config.format, format_alpaca)
 
@@ -127,7 +176,7 @@ def preprocess_data(config: DataConfig) -> dict:
 
     # Split into train/eval
     if config.eval_file:
-        eval_raw = load_raw_data(config.eval_file)
+        eval_raw = load_raw_data(config.eval_file, chunk_size=chunk_size, overlap=overlap)
         eval_formatted = [formatter(ex) for ex in eval_raw]
         return {"train": formatted, "eval": eval_formatted}
 

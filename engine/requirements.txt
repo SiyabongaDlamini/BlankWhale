@@ -12,6 +12,7 @@ bitsandbytes>=0.41.0
 # Data processing
 sentencepiece>=0.1.99
 protobuf>=3.20.0
+pymupdf>=1.23.0
 
 # Server
 websockets>=12.0
