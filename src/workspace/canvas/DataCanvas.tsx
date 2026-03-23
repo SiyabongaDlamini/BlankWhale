@@ -1,5 +1,7 @@
 import { UploadCloud, FileText, FileSpreadsheet, Eye, Trash2, Database } from 'lucide-react';
 import type { LocalFile } from '../FileExplorer';
+import { open } from '@tauri-apps/plugin-dialog';
+import { readFile, writeFile, mkdir } from '@tauri-apps/plugin-fs';
 import { useRef, useState } from 'react';
 import type { useEngine } from '../../hooks/useEngine';
 
@@ -24,37 +26,77 @@ export default function DataCanvas({ files, setFiles, selectedFile, setSelectedF
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  const handleFiles = (fileList: FileList | File[]) => {
-    const newFiles = Array.from(fileList).map(f => {
-      let ext = f.name.split('.').pop()?.toLowerCase() || 'txt';
-      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) ext = 'image';
-      if (['mp3', 'wav', 'ogg'].includes(ext)) ext = 'audio';
-
-      return {
-        name: f.name,
-        type: ext,
-        size: formatSize(f.size),
-        rawSize: f.size,
-        status: 'ready' as const,
-        fileObj: f
-      };
-    });
-
-    setFiles(prev => {
-      const existingNames = new Set(prev.map(p => p.name));
-      const filtered = newFiles.filter(nf => !existingNames.has(nf.name));
-      return [...prev, ...filtered];
-    });
+  const handleFiles = async (fileList?: FileList | File[]) => {
+    // If we have a fileList (from drop), we try to get paths if possible, 
+    // but better to use the native dialog for all "Upload" actions in Tauri.
     
-    if (!selectedFile && newFiles.length > 0) {
-      setSelectedFile(newFiles[0].name);
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [{
+          name: 'Data Files',
+          extensions: ['txt', 'csv', 'json', 'jsonl', 'pdf']
+        }]
+      });
+
+      if (selected && Array.isArray(selected)) {
+        for (const filePath of selected) {
+          const fileName = filePath.split('/').pop() || 'unknown';
+          const ext = fileName.split('.').pop()?.toLowerCase() || 'txt';
+          
+          // Copy to local data directory
+          try {
+            const content = await readFile(filePath);
+            await mkdir('data', { recursive: true });
+            await writeFile(`data/${fileName}`, content);
+            
+            setFiles(prev => {
+              if (prev.find(f => f.name === fileName)) return prev;
+              return [...prev, {
+                name: fileName,
+                type: ext,
+                size: formatSize(content.length),
+                rawSize: content.length,
+                status: 'ready' as const,
+              }];
+            });
+          } catch (err) {
+            console.error(`Failed to copy file ${fileName}:`, err);
+          }
+        }
+      } else if (selected && typeof selected === 'string') {
+          // Single file
+          const filePath = selected;
+          const fileName = filePath.split('/').pop() || 'unknown';
+          const ext = fileName.split('.').pop()?.toLowerCase() || 'txt';
+          const content = await readFile(filePath);
+          await mkdir('data', { recursive: true });
+          await writeFile(`data/${fileName}`, content);
+          
+          setFiles(prev => {
+            if (prev.find(f => f.name === fileName)) return prev;
+            return [...prev, {
+              name: fileName,
+              type: ext,
+              size: formatSize(content.length),
+              rawSize: content.length,
+              status: 'ready' as const,
+            }];
+          });
+      }
+    } catch (err) {
+      console.error('File dialog error:', err);
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
+    // For drop, we might still get files but paths are limited in browser zone.
+    // In Tauri v2, we should use the drag-drop event on the window, 
+    // but for now, we'll prompt the user to use the click-to-browse if drop fails to give paths.
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFiles(e.dataTransfer.files);
+       // Fallback to browse for now to ensure we get real paths/copying works
+       handleFiles();
     }
   };
 
