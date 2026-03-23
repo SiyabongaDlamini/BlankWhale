@@ -54,9 +54,9 @@ fn get_system_info() -> SystemInfo {
 fn find_python(engine_dir: &std::path::Path) -> String {
     // 1. Check for local virtual environment (ai_venv)
     #[cfg(target_os = "windows")]
-    let venv_python = engine_dir.join("engine").join("ai_venv").join("Scripts").join("python.exe");
+    let venv_python = engine_dir.join("ai_venv").join("Scripts").join("python.exe");
     #[cfg(not(target_os = "windows"))]
-    let venv_python = engine_dir.join("engine").join("ai_venv").join("bin").join("python3");
+    let venv_python = engine_dir.join("ai_venv").join("bin").join("python3");
 
     if venv_python.exists() {
         return venv_python.to_string_lossy().to_string();
