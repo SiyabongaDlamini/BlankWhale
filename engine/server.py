@@ -131,7 +131,8 @@ class MetricsServer:
     async def _run_training(self, config: dict):
         """Run training in a background thread."""
         logger.info(f"TRAIN: Config received: {config}")
-        logger.info(f"TRAIN: CWD='{os.getcwd()}', ENV_DATA_DIR='{os.environ.get('BLANKWHALE_DATA_DIR')}'")
+        data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+        logger.info(f"TRAIN: ENV_DATA_DIR='{data_dir}'")
         from .trainer import TrainingConfig, BlankWhaleTrainer
 
         training_config = TrainingConfig(**config) if config else TrainingConfig()
@@ -282,7 +283,7 @@ class MetricsServer:
         """Preview data extraction and chunking for the UI."""
         path = config.get("path", "")
         data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
-        logger.info(f"PREVIEW: Requested path='{path}', BLANKWHALE_DATA_DIR='{data_dir}', CWD='{os.getcwd()}'")
+        logger.info(f"PREVIEW: Requested path='{path}', BLANKWHALE_DATA_DIR='{data_dir}'")
         data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
         
         if path and not os.path.isabs(path):
@@ -495,7 +496,13 @@ class MetricsServer:
 
 def start_server(host: str = "127.0.0.1", port: int = 9876):
     """Entry point to start the BlankWhale training engine."""
-    data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+    data_dir = os.environ.get("BLANKWHALE_DATA_DIR", os.path.expanduser("~"))
+    # Stabilize CWD to prevent FileNotFoundError if app bundle is updated/deleted
+    try:
+        os.chdir(data_dir)
+    except Exception:
+        pass
+    
     log_file = os.path.join(data_dir, "engine.log")
     
     logging.basicConfig(
