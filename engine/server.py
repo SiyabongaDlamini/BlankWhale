@@ -1,16 +1,56 @@
-"""
-BlankWhale WebSocket Metrics Server
-Real-time bridge between the Python training engine and the Tauri/React UI.
-"""
-
 import asyncio
 import json
 import logging
 import signal
 import os
-from typing import Optional
+import sys
+import io
+from typing import Optional, Set
 
 logger = logging.getLogger("blankwhale.server")
+
+
+class WebSocketLogHandler(logging.Handler):
+    """Logging handler that sends logs to a MetricsServer for broadcasting."""
+    def __init__(self, server):
+        super().__init__()
+        self.server = server
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            if self.server._loop and self.server._loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self.server._broadcast(json.dumps({
+                        "event": "log",
+                        "data": {"message": msg, "type": record.levelname.lower()}
+                    })),
+                    self.server._loop
+                )
+        except Exception:
+            pass
+
+
+class StderrRedirector(io.TextIOBase):
+    """Redirects stderr (like tqdm bars) to WebSocket broadcast."""
+    def __init__(self, server):
+        self.server = server
+        self.original_stderr = sys.stderr
+
+    def write(self, s):
+        if s.strip():
+            if self.server._loop and self.server._loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self.server._broadcast(json.dumps({
+                        "event": "log",
+                        "data": {"message": s, "type": "info"}
+                    })),
+                    self.server._loop
+                )
+        return self.original_stderr.write(s)
+
+    def flush(self):
+        self.original_stderr.flush()
 
 
 class MetricsServer:
@@ -22,12 +62,26 @@ class MetricsServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 9876):
         self.host = host
         self.port = port
-        self.clients: set = set()
+        self.clients: Set = set()
         self.trainer = None
         self._server = None
         self._model = None
         self._tokenizer = None
         self._loop = None  # Will be set when server starts
+        
+        # Attach logging handler
+        self.log_handler = WebSocketLogHandler(self)
+        self.log_handler.setFormatter(logging.Formatter("%(message)s"))
+        
+        # Capture all relevant logs
+        for log_name in ["blankwhale", "transformers", "datasets", "peft", "accelerate"]:
+            l = logging.getLogger(log_name)
+            l.addHandler(self.log_handler)
+            l.propagate = False
+            
+        # Redirect stderr for tqdm progress bars
+        self.stderr_redirect = StderrRedirector(self)
+        sys.stderr = self.stderr_redirect
 
     async def handler(self, websocket):
         """Handle a new WebSocket connection."""

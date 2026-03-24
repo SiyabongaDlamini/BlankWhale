@@ -75,6 +75,39 @@ export default function ConsolePanel({ activeTab, engine }: ConsolePanelProps) {
       }]);
     }
   }, [engine.metrics.length]);
+  
+  // Log real-time engine output (including tqdm progress bars)
+  useEffect(() => {
+    if (engine.latestLog) {
+      const now = new Date().toLocaleTimeString('en', { hour12: false });
+      const rawMessage = engine.latestLog.message;
+      
+      setLogs(prev => {
+        // Handle carriage return (\r) for in-place progress bar updates
+        if (rawMessage.includes('\r')) {
+          const parts = rawMessage.split('\r');
+          const lastPart = parts[parts.length - 1].trim();
+          
+          if (lastPart && prev.length > 0) {
+            // Replace the last log if it looks like a progress update
+            const newLogs = [...prev];
+            newLogs[newLogs.length - 1] = {
+              ...newLogs[newLogs.length - 1],
+              message: lastPart
+            };
+            return newLogs;
+          }
+        }
+        
+        // Normal append for new lines
+        return [...prev, {
+          time: now,
+          type: (engine.latestLog?.type as any) || 'info',
+          message: rawMessage.trim()
+        }];
+      });
+    }
+  }, [engine.latestLog]);
 
   // Log tab switches
   useEffect(() => {

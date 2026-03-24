@@ -30,6 +30,7 @@ export function useEngine() {
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [latestLog, setLatestLog] = useState<{ message: string, type: string } | null>(null);
   const [isTraining, setIsTraining] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
@@ -108,6 +109,9 @@ export function useEngine() {
             break;
           case 'export_complete':
             setStatusMessage(`Export complete: ${msg.data.output_path || 'Done'}`);
+            break;
+          case 'log':
+            setLatestLog(msg.data);
             break;
           case 'error':
             console.error('Engine error:', msg.data.message);
@@ -229,6 +233,7 @@ export function useEngine() {
     hardware,
     metrics,
     statusMessage,
+    latestLog,
     isTraining,
     startTraining,
     stopTraining,
