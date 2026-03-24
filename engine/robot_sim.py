@@ -16,9 +16,11 @@ The Three.js frontend renders the scene from joint state data.
 import logging
 import math
 import json
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
+from .debug_logger import log_function, logger
 
 logger = logging.getLogger("blankwhale.robot_sim")
 
@@ -84,12 +86,14 @@ class RobotSimulation:
         self._config = SceneConfig()
         self._step_count = 0
 
+    @log_function
     def setup(self, scene_config: SceneConfig, robot_config: RobotConfig):
         """Initialize PyBullet and load the robot + scene."""
         try:
             import pybullet as p
             import pybullet_data
         except ImportError:
+            logger.error("PyBullet not installed. Critical for robotics.")
             raise ImportError(
                 "PyBullet not installed. Install: pip install pybullet"
             )
@@ -150,13 +154,10 @@ class RobotSimulation:
             if joint_type in (0, 1):
                 self._joint_indices.append(i)
 
+    @log_function
     def step(self, actions: Optional[List[float]] = None) -> SimState:
         """
         Step the simulation forward.
-        
-        Args:
-            actions: Torques or position targets for each controllable joint.
-                     Length must match len(self._joint_indices).
         """
         p = self._p
 
@@ -307,8 +308,31 @@ class RobotSimulation:
             "step_count": self._step_count,
         }
 
+    @log_function
     def close(self):
         """Disconnect from PyBullet."""
         if self._p:
+            logger.info("Closing PyBullet simulation...")
             self._p.disconnect()
             self._p = None
+
+    @log_function
+    def debug_run(self, steps: int = 100):
+        """Expert debug mode: run a minimal 100-step simulation."""
+        logger.info(f"🚀 ROBOT DEBUG MODE: Running {steps} steps...")
+        try:
+            # Default to a sphere if no URDF provided
+            if not self._robot_id:
+                logger.info("No robot loaded, adding test sphere...")
+                self.add_object(shape="sphere", position=(0, 0, 1), mass=1.0)
+            
+            for i in range(steps):
+                state = self.step()
+                if i % 20 == 0:
+                    logger.info(f"Step {i}: Pos={state.robot_position}, Energy={state.energy:.4f}")
+            
+            logger.info("✅ ROBOT SIMULATION TEST SUCCESSFUL")
+            return True
+        except Exception as e:
+            logger.error(f"Robot Debug failed: {e}")
+            return False

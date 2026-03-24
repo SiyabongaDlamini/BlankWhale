@@ -1,14 +1,13 @@
-"""
-BlankWhale Training Orchestrator
-Manages the full training pipeline with real-time metrics reporting.
-"""
-
 import time
 import json
 import os
+import gc
+import torch
+import traceback
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 from pathlib import Path
+from .debug_logger import log_function, logger
 
 
 @dataclass
@@ -45,8 +44,9 @@ class TrainingConfig:
     output_dir: str = "./output"
     save_steps: int = 500
     eval_steps: int = 250
-    logging_steps: int = 10
+    logging_steps: int = 1
     push_to_hub: bool = False
+    debug_mode: bool = False  # If True, runs only 10 steps on synthetic data if needed
 
 
 class BlankWhaleTrainer:
@@ -82,13 +82,18 @@ class BlankWhaleTrainer:
             self.on_metrics({"event": event, "data": data, "timestamp": time.time()})
 
     def setup(self):
-        """Initialize model, tokenizer, and data."""
+        """Initialize model, tokenizer, and data with expert safeguards."""
         from .gpu_detect import detect_hardware
         from .model_loader import ModelConfig, load_model
         from .data_pipeline import DataConfig, preprocess_data
 
+        # Memory cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
         # Detect hardware
-        self._emit("status", {"message": "Detecting hardware..."})
+        self._emit("status", {"message": "🔍 Detecting hardware..."})
         hw = detect_hardware()
         self._emit("hardware", hw)
 
@@ -180,17 +185,34 @@ class BlankWhaleTrainer:
         )
 
         # Create HuggingFace Trainer
-        self._emit("status", {"message": "Starting training..."})
-        trainer = Trainer(
+        self._emit("status", {"message": "🚀 Starting training engine..."})
+        
+        # Use SFTTrainer if possible for better instruction handling
+        try:
+            from trl import SFTTrainer
+            trainer_class = SFTTrainer
+            extra_kwargs = {
+                "dataset_text_field": "text" if self.config.data_format != "alpaca" else None,
+                "max_seq_length": self.config.max_seq_length,
+            }
+        except ImportError:
+            logger.warning("trl (SFTTrainer) not found. Falling back to standard Trainer.")
+            trainer_class = Trainer
+            extra_kwargs = {}
+
+        trainer = trainer_class(
             model=self.model,
             args=training_args,
             train_dataset=self.dataset["train"],
             eval_dataset=self.dataset.get("eval"),
             tokenizer=self.tokenizer,
             callbacks=[MetricsCallback()],
+            **extra_kwargs
         )
 
         try:
+            logger.info("\n" + "="*50 + "\n🚀 TRAINING STARTED SUCCESSFULLY\n" + "="*50)
+            self._emit("status", {"message": "✅ Training in progress..."})
             result = trainer.train()
             self._emit("training_complete", {
                 "total_steps": result.global_step,

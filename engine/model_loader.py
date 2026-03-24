@@ -1,12 +1,9 @@
-"""
-BlankWhale Model Loader
-Load base models from HuggingFace for fine-tuning.
-"""
-
 import os
 import logging
+import torch
 from dataclasses import dataclass, field
 from typing import Optional
+from .debug_logger import log_function, logger
 
 logger = logging.getLogger("blankwhale.model_loader")
 
@@ -25,6 +22,7 @@ class ModelConfig:
     cache_dir: Optional[str] = None
 
 
+@log_function
 def load_model(config: ModelConfig, device: str = "auto"):
     """
     Load a base model and optionally apply LoRA/QLoRA adapters.
@@ -34,8 +32,11 @@ def load_model(config: ModelConfig, device: str = "auto"):
     """
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-    print(f"Loading base model: {config.base_model}")
-    print(f"Strategy: {config.strategy}, Quantization: {config.quantization}")
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
+    logger.info(f"Loading base model: {config.base_model}")
+    logger.info(f"Strategy: {config.strategy}, Quantization: {config.quantization}, Device: {device}")
 
     tokenizer = AutoTokenizer.from_pretrained(
         config.base_model,
@@ -53,23 +54,23 @@ def load_model(config: ModelConfig, device: str = "auto"):
         import torch
         if not torch.cuda.is_available() or sys.platform == "darwin":
             if sys.platform == "darwin":
-                print("Warning: Quantization (bitsandbytes) is not supported on macOS GPU. Falling back to full precision.")
+                logger.warning("Quantization (bitsandbytes) is not supported on macOS GPU. Falling back to full precision.")
             else:
-                print("Warning: CUDA not available. bitsandbytes quantization requires CUDA. Falling back to full precision.")
+                logger.warning("CUDA not available. bitsandbytes quantization requires CUDA. Falling back to full precision.")
             quantization_config = None
         else:
             try:
                 if config.quantization == "4bit":
                     quantization_config = BitsAndBytesConfig(
                         load_in_4bit=True,
-                        bnb_4bit_compute_dtype="float16",
+                        bnb_4bit_compute_dtype=torch.float16,
                         bnb_4bit_quant_type="nf4",
                         bnb_4bit_use_double_quant=True,
                     )
                 elif config.quantization == "8bit":
                     quantization_config = BitsAndBytesConfig(load_in_8bit=True)
             except Exception as e:
-                print(f"Warning: Quantization failed ({e}). Loading without quantization.")
+                logger.warning(f"Quantization failed ({e}). Loading without quantization.")
                 quantization_config = None
 
     # Load model
@@ -78,15 +79,25 @@ def load_model(config: ModelConfig, device: str = "auto"):
         "trust_remote_code": True,
         "device_map": device,
     }
-    logger.info(f"MODEL_LOADER: Loading model from {config.base_model}, cache_dir={config.cache_dir}, device={device}")
+    
     if quantization_config:
         load_kwargs["quantization_config"] = quantization_config
+        # For QLoRA, use bfloat16 if supported, else float16
+        load_kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
 
     try:
         model = AutoModelForCausalLM.from_pretrained(
             config.base_model,
             **load_kwargs,
         )
+        
+        # Save sanity check
+        if config.cache_dir:
+            sanity_path = os.path.join(config.cache_dir, "sanity_check")
+            os.makedirs(sanity_path, exist_ok=True)
+            tokenizer.save_pretrained(sanity_path)
+            logger.info(f"Sanity: Tokenizer saved to {sanity_path}")
+
     except Exception as e:
         logger.error(f"MODEL_LOADER Error: {e}")
         raise e
@@ -97,19 +108,24 @@ def load_model(config: ModelConfig, device: str = "auto"):
 
     # Print model stats
     trainable, total = _count_parameters(model)
-    print(f"Total parameters:     {total:,}")
-    print(f"Trainable parameters: {trainable:,}")
-    print(f"Trainable %:          {100 * trainable / total:.2f}%")
+    logger.info(f"Total parameters:     {total:,}")
+    logger.info(f"Trainable parameters: {trainable:,}")
+    logger.info(f"Trainable %:          {100 * trainable / total:.2f}%")
 
     return model, tokenizer
 
 
+@log_function
 def _apply_lora(model, config: ModelConfig):
     """Apply LoRA adapters to the model."""
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
     if config.quantization != "none":
+        logger.info("Preparing model for k-bit training...")
         model = prepare_model_for_kbit_training(model)
+
+    # Enable gradient checkpointing for memory efficiency
+    model.gradient_checkpointing_enable()
 
     lora_config = LoraConfig(
         r=config.lora_r,
@@ -121,7 +137,7 @@ def _apply_lora(model, config: ModelConfig):
     )
 
     model = get_peft_model(model, lora_config)
-    print(f"LoRA applied: r={config.lora_r}, alpha={config.lora_alpha}")
+    logger.info(f"LoRA applied: r={config.lora_r}, alpha={config.lora_alpha}")
     return model
 
 

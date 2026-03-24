@@ -9,8 +9,10 @@ import subprocess
 import json
 
 
+@log_function
 def detect_hardware() -> dict:
-    """Detect all available compute hardware."""
+    """Expert hardware detection for local AI training."""
+    import psutil
     info = {
         "device": "cpu",
         "gpu_available": False,
@@ -29,7 +31,6 @@ def detect_hardware() -> dict:
     # Try PyTorch detection
     try:
         import torch
-
         info["pytorch_version"] = torch.__version__
 
         if torch.cuda.is_available():
@@ -37,26 +38,28 @@ def detect_hardware() -> dict:
             info["gpu_available"] = True
             info["gpu_count"] = torch.cuda.device_count()
             info["gpu_name"] = torch.cuda.get_device_name(0)
-            info["gpu_memory_gb"] = round(
-                torch.cuda.get_device_properties(0).total_mem / 1e9, 1
-            )
-            info["cuda_version"] = torch.version.cuda
+            info["gpu_memory_gb"] = round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1)
+            info["cuda_version"] = getattr(torch.version, "cuda", None)
+            logger.info(f"DETECTED: CUDA GPU ({info['gpu_name']}) - {info['gpu_memory_gb']}GB VRAM")
 
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             info["device"] = "mps"
             info["gpu_available"] = True
             info["gpu_name"] = "Apple Silicon (Metal)"
             info["gpu_count"] = 1
-            # Estimate Metal GPU memory from system RAM
-            info["gpu_memory_gb"] = info["ram_gb"]
+            # Estimate Metal GPU memory from system RAM (70% limit usually)
+            info["gpu_memory_gb"] = round(info["ram_gb"] * 0.7, 1)
+            logger.info(f"DETECTED: Apple Silicon GPU (MPS) - Unified Memory Limit: {info['gpu_memory_gb']}GB")
 
-        elif hasattr(torch, "hip") and torch.hip.is_available():
-            info["device"] = "rocm"
+        elif (hasattr(torch, "version") and hasattr(torch.version, "hip") and torch.version.hip) or (hasattr(torch, "hip") and torch.hip.is_available()):
+            info["device"] = "cuda" # Use 'cuda' string for ROCm in torch
             info["gpu_available"] = True
             info["gpu_name"] = "AMD ROCm GPU"
             info["gpu_count"] = 1
+            logger.info("DETECTED: AMD ROCm GPU")
 
     except ImportError:
+        logger.warning("PyTorch not installed. Hardware detection limited.")
         info["pytorch_version"] = None
 
     # Fallback: try nvidia-smi directly
@@ -67,6 +70,10 @@ def detect_hardware() -> dict:
             info["gpu_name"] = nvidia_info.get("name", "NVIDIA GPU")
             info["gpu_memory_gb"] = nvidia_info.get("memory_gb")
             info["device"] = "cuda"
+            logger.info(f"DETECTED: NVIDIA GPU via nvidia-smi ({info['gpu_name']})")
+
+    if not info["gpu_available"]:
+        logger.info("DETECTED: No GPU found. Falling back to CPU for training (SLOW).")
 
     return info
 

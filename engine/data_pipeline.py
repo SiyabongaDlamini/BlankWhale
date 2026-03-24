@@ -11,9 +11,11 @@ import json
 import csv
 import re
 import logging
+import os
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
+from .debug_logger import log_function, logger
 
 logger = logging.getLogger("blankwhale.pipeline")
 
@@ -51,6 +53,7 @@ class ExtractionResult:
 # Multi-Format Loader
 # ============================================================
 
+@log_function
 def extract_document(path: str, max_pages: Optional[int] = None) -> ExtractionResult:
     """
     Intelligently extract text from any supported document format.
@@ -598,21 +601,23 @@ def save_training_data(records: List[Dict], output_path: str = "./data/train.jso
     
     logger.info(f"Saved {len(records)} training records to {output_path}")
 
+@log_function
 def preprocess_data(config: DataConfig):
-    """Legacy compatibility: load prepared dataset for training."""
+    """Load prepared dataset for training, with synthetic fallback."""
     from datasets import load_dataset
     import os
     
+    # Check if file exists and has content
+    file_exists = os.path.exists(config.train_file)
+    is_empty = file_exists and os.path.getsize(config.train_file) < 10
+
+    if not file_exists or is_empty:
+        logger.warning(f"Training file {config.train_file} not found or empty. Creating synthetic dataset.")
+        create_synthetic_dataset(config.train_file, format_type=config.format)
+
     data_files = {"train": config.train_file}
     if config.eval_file and os.path.exists(config.eval_file):
         data_files["eval"] = config.eval_file
-        
-    if not os.path.exists(config.train_file):
-        # Create a dummy to prevent crashes on init, or raise error if training
-        logger.warning(f"Training file {config.train_file} not found. Creating a minimal dummy dataset.")
-        Path(config.train_file).parent.mkdir(parents=True, exist_ok=True)
-        with open(config.train_file, "w") as f:
-            f.write(json.dumps({"text": "dummy data"}) + "\n")
             
     dataset = load_dataset("json", data_files=data_files)
     
@@ -620,3 +625,35 @@ def preprocess_data(config: DataConfig):
         dataset["train"] = dataset["train"].shuffle(seed=42)
         
     return dataset
+
+@log_function
+def create_synthetic_dataset(output_path: str, format_type: str = "alpaca"):
+    """Create a minimal 10-example synthetic dataset for debugging."""
+    logger.info(f"Creating synthetic dataset at {output_path} (format: {format_type})")
+    examples = []
+    
+    topics = [
+        "What is BlankWhale?", "How to train a model", "GPU detection", 
+        "Data privacy", "Local AI benefits", "Robotics simulation",
+        "Fine-tuning techniques", "LoRA vs QLoRA", "Markdown extraction", 
+        "Model quantization"
+    ]
+    
+    for i, topic in enumerate(topics):
+        if format_type == "alpaca":
+            examples.append({
+                "instruction": f"Explain {topic} in the context of BlankWhale.",
+                "input": "",
+                "output": f"BlankWhale provides expert tools for {topic}, ensuring privacy and local execution."
+            })
+        else:
+            examples.append({
+                "text": f"### Topic: {topic}\nBlankWhale is an expert local AI studio that handles {topic} efficiently on consumer hardware."
+            })
+            
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        for ex in examples:
+            f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+    
+    logger.info(f"Successfully created 10 synthetic examples.")
