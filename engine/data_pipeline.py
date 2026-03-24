@@ -51,7 +51,7 @@ class ExtractionResult:
 # Multi-Format Loader
 # ============================================================
 
-def extract_document(path: str) -> ExtractionResult:
+def extract_document(path: str, max_pages: Optional[int] = None) -> ExtractionResult:
     """
     Intelligently extract text from any supported document format.
     Returns clean markdown with preserved structure.
@@ -85,27 +85,32 @@ def extract_document(path: str) -> ExtractionResult:
         raise ValueError(f"Unsupported file format: {ext}")
     
     logger.info(f"Extracting {ext} document: {p.name}")
-    return extractor(p)
+    return extractor(p, max_pages=max_pages) if ext == ".pdf" else extractor(p)
 
 
 def _extract_pdf(path: Path) -> ExtractionResult:
     """
-    Extract structured text from PDF using pdfplumber (tables/layout)
-    with PyMuPDF fallback for text-heavy documents.
+    Extract structured text from PDF.
     
     Strategy:
-    1. Try pdfplumber first for tables and structured content
-    2. Fall back to PyMuPDF block-based extraction
-    3. Preserve headers, paragraphs, and table structure as markdown
+    1. Use PyMuPDF (fitz) first - it's much faster for text-heavy documents.
+    2. Use pdfplumber only for specialized layout/table parsing if fitz is not enough.
     """
+    # For general extraction, fitz is the winner on speed
+    try:
+        return _extract_pdf_pymupdf(path)
+    except Exception as e:
+        logger.warning(f"PyMuPDF failed ({e}), trying pdfplumber...")
+        return _extract_pdf_pdfplumber(path)
+
+def _extract_pdf_pdfplumber(path: Path) -> ExtractionResult:
+    """Extract using pdfplumber (fallback)."""
     markdown_parts = []
     page_count = 0
     has_tables = False
     
-    # --- Primary: pdfplumber (best for tables + layout) ---
     try:
         import pdfplumber
-        
         with pdfplumber.open(path) as pdf:
             page_count = len(pdf.pages)
             
@@ -156,7 +161,7 @@ def _extract_pdf(path: Path) -> ExtractionResult:
     )
 
 
-def _extract_pdf_pymupdf(path: Path) -> ExtractionResult:
+def _extract_pdf_pymupdf(path: Path, max_pages: Optional[int] = None) -> ExtractionResult:
     """Fallback PDF extraction using PyMuPDF (fitz)."""
     try:
         import fitz
@@ -166,7 +171,9 @@ def _extract_pdf_pymupdf(path: Path) -> ExtractionResult:
     doc = fitz.open(path)
     markdown_parts = []
     
-    for page in doc:
+    for i, page in enumerate(doc):
+        if max_pages and i >= max_pages:
+            break
         blocks = page.get_text("dict")["blocks"]
         page_lines = []
         

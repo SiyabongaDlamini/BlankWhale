@@ -48,10 +48,14 @@ def load_model(config: ModelConfig, device: str = "auto"):
 
     # Quantization config
     quantization_config = None
+    import sys
     if config.strategy in ("qlora", "lora") and config.quantization != "none":
         import torch
-        if not torch.cuda.is_available():
-            print("Warning: CUDA not available. bitsandbytes quantization requires CUDA. Falling back to full precision.")
+        if not torch.cuda.is_available() or sys.platform == "darwin":
+            if sys.platform == "darwin":
+                print("Warning: Quantization (bitsandbytes) is not supported on macOS GPU. Falling back to full precision.")
+            else:
+                print("Warning: CUDA not available. bitsandbytes quantization requires CUDA. Falling back to full precision.")
             quantization_config = None
         else:
             try:

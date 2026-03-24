@@ -302,7 +302,8 @@ class MetricsServer:
         loop = asyncio.get_event_loop()
         try:
             def load():
-                result = extract_document(path)
+                # Only extract first 10 pages for lightning-fast preview
+                result = extract_document(path, max_pages=10)
                 chunks = chunk_by_semantic_boundaries(
                     result.markdown, chunk_size=chunk_size, overlap=overlap
                 )
