@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface HardwareInfo {
   device: string;
@@ -16,8 +17,16 @@ export interface TrainingMetrics {
   total_steps: number;
 }
 
+export interface EngineStatus {
+  running: boolean;
+  installed: boolean;
+  pid: number | null;
+}
+
 export function useEngine() {
   const [isConnected, setIsConnected] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(true); // Default to true to avoid flicker
+  const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>('');
@@ -25,6 +34,33 @@ export function useEngine() {
   
   const wsRef = useRef<WebSocket | null>(null);
   const inferenceCallbackRef = useRef<((response: string) => void) | null>(null);
+
+  const checkStatus = useCallback(async () => {
+    try {
+      const status = await invoke<EngineStatus>('get_engine_status');
+      setIsInstalled(status.installed);
+      return status;
+    } catch (err) {
+      console.error('Failed to get engine status:', err);
+      return null;
+    }
+  }, []);
+
+  const setup = useCallback(async () => {
+    setIsBootstrapping(true);
+    setStatusMessage('Bootstrapping AI engine... This may take a few minutes.');
+    try {
+      await invoke('setup_engine');
+      setIsInstalled(true);
+      setStatusMessage('Setup complete! Starting engine...');
+      await invoke('restart_engine');
+    } catch (err) {
+      console.error('Setup failed:', err);
+      setStatusMessage(`Setup failed: ${err}`);
+    } finally {
+      setIsBootstrapping(false);
+    }
+  }, []);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -91,7 +127,12 @@ export function useEngine() {
     ws.onclose = () => {
       setIsConnected(false);
       setIsTraining(false);
-      setTimeout(connect, 3000);
+      // Only retry if marked as installed
+      setTimeout(() => {
+        checkStatus().then(status => {
+           if (status?.installed) connect();
+        });
+      }, 3000);
     };
 
     ws.onerror = () => {
@@ -99,16 +140,20 @@ export function useEngine() {
     };
 
     wsRef.current = ws;
-  }, []);
+  }, [checkStatus]);
 
   useEffect(() => {
-    connect();
+    checkStatus().then(status => {
+      if (status?.installed) {
+        connect();
+      }
+    });
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, [connect]);
+  }, [connect, checkStatus]);
 
   const startTraining = useCallback((config: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -179,6 +224,8 @@ export function useEngine() {
 
   return {
     isConnected,
+    isInstalled,
+    isBootstrapping,
     hardware,
     metrics,
     statusMessage,
@@ -189,5 +236,7 @@ export function useEngine() {
     runInference,
     loadHfDataset,
     previewData,
+    setup,
+    checkStatus,
   };
 }

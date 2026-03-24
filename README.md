@@ -1,133 +1,112 @@
-<p align="center">
-  <img src="public/whale-logo.png" alt="BlankWhale" width="120" />
-</p>
+# 🐋 BlankWhale — Local AI & Robotics Studio
 
-<h1 align="center">BlankWhale</h1>
+> **Train private LLMs and robots on your own hardware — no cloud, no leaks, no code required.**
 
-<p align="center">
-  <strong>Open-source AI Training Studio</strong><br>
-  Train, fine-tune, and deploy AI models on your own hardware. No cloud. No code required.
-</p>
-
-<p align="center">
-  <a href="#download">Download</a> •
-  <a href="#features">Features</a> •
-  <a href="#getting-started">Getting Started</a> •
-  <a href="#contributing">Contributing</a>
-</p>
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20|%20Windows%20|%20Linux-brightgreen)]()
+[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Local-green)]()
 
 ---
 
-## Download
+## What is BlankWhale?
 
-Download BlankWhale for your operating system. No terminal commands needed — just install and run.
+BlankWhale is a **privacy-first desktop application** for training AI models entirely on your own hardware. No data ever leaves your machine. Built for hospitals, law firms, factories, governments, and anyone who needs private AI.
 
-| Platform | Download | Requirements |
-|----------|----------|--------------|
-| **macOS** (Apple Silicon & Intel) | [Download .dmg](https://github.com/SiyabongaDlamini/BlankWhale/releases/latest/download/BlankWhale_macos.dmg) | macOS 10.15+ |
-| **Windows** (64-bit) | [Download .msi](https://github.com/SiyabongaDlamini/BlankWhale/releases/latest/download/BlankWhale_windows.msi) | Windows 10+ |
-| **Linux** (64-bit) | [Download .AppImage](https://github.com/SiyabongaDlamini/BlankWhale/releases/latest/download/BlankWhale_linux.AppImage) | Ubuntu 20.04+ / Fedora 36+ |
+### 🧠 LLM Training Studio
+- **Smart Document Extraction** — Drop PDFs, DOCX, TXT, CSV, or images. Our pipeline extracts clean, structured markdown with tables, headers, and semantic boundaries. No more raw chunk garbage.
+- **Built-in PII Redaction** — Automatically detect and anonymize emails, phone numbers, names, medical IDs, and more. Uses regex + spaCy NER, all running locally.
+- **Auto QA Generation** — Instantly generate training pairs from your documents using vertical templates (Medical, Legal, Knowledge Base, Turkish Medical, Code).
+- **No-Code Training** — Visual sliders for chunk size, LoRA rank, learning rate, epochs, batch size. Just drop files and click train.
+- **Chat with Your Model** — Test your fine-tuned model instantly in the built-in chat interface.
+- **One-Click Export** — Export to safetensors, GGUF (Ollama), ONNX, or merged model.
 
-> For GPU-accelerated training, install [CUDA](https://developer.nvidia.com/cuda-downloads) (NVIDIA) or use Apple Silicon (Metal support built-in).
+### 🤖 Robotics & Embodied AI Studio *(Coming Soon)*
+- **3D Physics Simulation** — PyBullet + MuJoCo-based training environment with full physics.
+- **Visual Scene Builder** — Drag-and-drop floors, walls, objects. Sliders for gravity and friction.
+- **RL Training** — Stable-Baselines3 PPO/SAC, with live reward charts and 3D viewport.
+- **Natural Language Rewards** — Describe what you want: "pick up fragile objects gently".
+- **LLM → Robot Bridge** — Use your trained LLM to command robots via Vision-Language-Action models.
 
----
-
-## Features
-
-### Visual Training Studio
-- Drag-and-drop dataset upload (PDF, DOCX, CSV, JSON, TXT, images, audio, URLs)
-- Visual training configuration — no YAML editing required
-- Real-time training metrics with live loss charts
-- Neural network visualization showing your model growing
-
-### Built-in Code Editor
-- Full Monaco Editor (VS Code engine) for writing custom training configs
-- Python, YAML, JSON syntax highlighting
-- Template files for LoRA configs, custom loss functions, data pipelines
-
-### Local-First Training
-- Train on **your own GPU** — NVIDIA CUDA, Apple Metal, AMD ROCm
-- Fine-tune any HuggingFace model (Llama, Mistral, Phi, Gemma, Qwen, etc.)
-- LoRA / QLoRA for efficient training on consumer hardware
-- 4-bit and 8-bit quantization support
-
-### Model Export
-- Export to safetensors, GGUF (for Ollama/llama.cpp), ONNX
-- Merge LoRA adapters back into the base model
-- One-click deployment with REST API and embed widget
-
-### Evaluate & Chat
-- Chat with your trained model directly in the app
-- BLEU, ROUGE-L, Perplexity, F1 benchmarks
-- Compare before/after training performance
+### 🛡️ Enterprise Features
+- **Privacy Shield** — Real-time proof that zero bytes left the machine.
+- **Audit Logs** — Full compliance logging with "Proof of Local Training" PDF export.
+- **Team Templates** — Shared training presets across organizations.
 
 ---
 
-## Architecture
+## Tech Stack
 
-```
-blankwhale/
-├── src/                    # React + TypeScript frontend
-│   ├── workspace/          # All workspace panels and canvases
-│   └── components/         # Reusable UI components
-├── src-tauri/              # Tauri desktop shell (Rust)
-│   └── src/lib.rs          # GPU detection, file access, shell commands
-├── engine/                 # Python training engine
-│   ├── trainer.py          # Training orchestration (HuggingFace Trainer)
-│   ├── model_loader.py     # Model loading with LoRA/QLoRA
-│   ├── data_pipeline.py    # Data loading and preprocessing
-│   ├── gpu_detect.py       # GPU detection (CUDA/Metal/ROCm)
-│   ├── server.py           # WebSocket server for real-time metrics
-│   └── export.py           # Export to safetensors/GGUF/ONNX
-└── .github/workflows/      # CI/CD for automated builds
-```
+| Layer | Technology |
+|-------|-----------|
+| Desktop | Tauri 2 (Rust) |
+| Frontend | React + TypeScript |
+| LLM Engine | PyTorch + HuggingFace Transformers + PEFT (LoRA/QLoRA) |
+| Document Processing | pdfplumber + PyMuPDF + python-docx + pytesseract |
+| PII Detection | Regex + spaCy NER |
+| GPU Support | NVIDIA CUDA, Apple Metal (MPS), AMD ROCm |
+| Robotics | PyBullet + Gymnasium + Stable-Baselines3 |
+| 3D Viewport | Three.js |
 
 ---
 
-## Getting Started
-
-### For Users
-Just [download the app](#download) for your platform. No setup needed.
-
-### For Developers
+## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/SiyabongaDlamini/BlankWhale.git
-cd blankwhale
+# Clone the repo
+git clone https://github.com/SiyabongaDlamini/blankWhale.git
+cd blankWhale
 
-# Frontend
+# Install frontend dependencies
 npm install
 
-# Python engine
-pip install -r engine/requirements.txt
+# Set up Python engine
+cd engine && python3 -m venv ai_venv
+source ai_venv/bin/activate
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
 
-# Run (web)
-npm run dev
-
-# Run (desktop)
-npx tauri dev
-
-# Build installer
-npx tauri build
+# Run in development
+npm run tauri dev
 ```
 
----
-
-## GPU Support
-
-| GPU | Framework | Status |
-|-----|-----------|--------|
-| NVIDIA (RTX 3060+) | CUDA | Fully supported |
-| Apple Silicon (M1/M2/M3/M4) | Metal (MPS) | Fully supported |
-| AMD | ROCm | Experimental |
-| CPU only | — | Supported (slower) |
+Or download the [pre-built app](landing/index.html) for one-click installation.
 
 ---
 
-## Contributing
+## Supported File Formats
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+| Format | Extraction Method |
+|--------|------------------|
+| PDF | pdfplumber (tables/layout) + PyMuPDF (fallback) |
+| DOCX | python-docx with heading/table preservation |
+| TXT/MD | Direct text loading |
+| CSV | Converted to markdown tables |
+| JSON/JSONL | Structured preview |
+| Images (PNG, JPG, TIFF) | pytesseract OCR |
+
+---
+
+## Training Templates
+
+| Template | Use Case |
+|----------|----------|
+| Medical QA | Clinical text → diagnosis-style Q&A |
+| Legal Summarization | Contracts/legislation → plain language summaries |
+| Knowledge Base | Internal docs → factual Q&A pairs |
+| Turkish Medical | Tıbbi metinler → Türkçe Soru-Cevap |
+| Code QA | Source code → explanation/documentation pairs |
+
+---
+
+## Privacy Guarantee
+
+- ✅ All processing happens on your machine
+- ✅ No telemetry, no analytics, no phone-home
+- ✅ No cloud APIs — ever
+- ✅ Built-in PII redaction for sensitive data
+- ✅ Open source under MIT license
+
+---
 
 ## License
 
@@ -135,6 +114,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-<p align="center">
-  Built with Tauri, React, PyTorch, and HuggingFace Transformers.
-</p>
+**Built with ❤️ for privacy-first AI.**

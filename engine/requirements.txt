@@ -1,7 +1,9 @@
-# BlankWhale Training Engine Dependencies
+# BlankWhale v2 Training Engine Dependencies
 # Install with: pip install -r requirements.txt
 
+# ============================================================
 # Core ML
+# ============================================================
 torch>=2.1.0
 transformers<5.0.0
 datasets>=2.14.0
@@ -9,23 +11,51 @@ peft>=0.7.0
 accelerate>=0.25.0
 bitsandbytes>=0.41.0
 
-# Data processing
+# ============================================================
+# Document Processing (Smart Extraction Pipeline)
+# ============================================================
+pymupdf>=1.23.0               # PDF extraction (PyMuPDF / fitz)
+pdfplumber>=0.10.0             # PDF tables & structured layout
+python-docx>=1.0.0             # DOCX extraction
+Pillow>=10.0.0                 # Image processing
+pytesseract>=0.3.10            # OCR for scanned documents
+
+# ============================================================
+# PII Redaction
+# ============================================================
+spacy>=3.7.0                   # NER for names, locations, orgs
+# After install, run: python -m spacy download en_core_web_sm
+
+# ============================================================
+# Robotics & RL (Phase 3)
+# ============================================================
+# pybullet>=3.2.6              # Physics simulation
+# gymnasium>=0.29.0            # RL environments
+# stable-baselines3>=2.2.0     # RL algorithms
+
+# ============================================================
+# Server & Config
+# ============================================================
+websockets>=12.0
+pyyaml>=6.0
 sentencepiece>=0.1.99
 protobuf>=3.20.0
-pymupdf>=1.23.0
 
-# Server
-websockets>=12.0
-
-# Config
-pyyaml>=6.0
-
+# ============================================================
 # Utilities
+# ============================================================
 tqdm>=4.65.0
 psutil>=5.9.0
 numpy<2.0.0
 
-# Export (optional)
-# llama-cpp-python>=0.2.0    # For GGUF export
-# optimum[exporters]>=1.14.0 # For ONNX export
-# safetensors>=0.4.0         # Already included with transformers
+# ============================================================
+# Export (optional — uncomment as needed)
+# ============================================================
+# llama-cpp-python>=0.2.0      # GGUF export
+# optimum[exporters]>=1.14.0   # ONNX export
+# safetensors>=0.4.0           # Already with transformers
+
+# ============================================================
+# Enterprise (Phase 4)
+# ============================================================
+# reportlab>=4.0.0             # PDF compliance reports

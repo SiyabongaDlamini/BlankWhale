@@ -1,20 +1,29 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Play, Square, Cpu } from 'lucide-react';
 import type { TrainingConfig } from '../../App';
+import type { LocalFile } from '../FileExplorer';
 
 interface TrainCanvasProps {
   engine: ReturnType<typeof import('../../hooks/useEngine').useEngine>;
   trainConfig: TrainingConfig;
+  files: LocalFile[];
+  selectedFile: string | null;
 }
 
-export default function TrainCanvas({ engine, trainConfig }: TrainCanvasProps) {
+export default function TrainCanvas({ engine, trainConfig, files, selectedFile }: TrainCanvasProps) {
   const { isConnected, hardware, metrics, statusMessage, isTraining, startTraining, stopTraining } = engine;
 
   const handleStartStop = () => {
     if (isTraining) {
       stopTraining();
     } else {
-      // Use real config from inspectors sidebar
+      // Find the best training file
+      const datasetFile = files.find(f => f.name === selectedFile) || 
+                          files.find(f => ['jsonl', 'json', 'csv', 'txt'].includes(f.type));
+      
+      const trainFilePath = datasetFile?.path || (datasetFile ? `./data/${datasetFile.name}` : undefined);
+      console.log(`[Frontend] Starting training with file: "${trainFilePath}"`);
+
       startTraining({
         base_model: trainConfig.baseModel,
         strategy: trainConfig.strategy,
@@ -22,6 +31,7 @@ export default function TrainCanvas({ engine, trainConfig }: TrainCanvasProps) {
         epochs: trainConfig.epochs,
         batch_size: trainConfig.batchSize,
         learning_rate: trainConfig.learningRate,
+        train_file: trainFilePath,
       });
     }
   };

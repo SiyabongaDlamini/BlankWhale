@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Settings, Play, ChevronDown, Download, Share2 } from 'lucide-react';
+import { Save, Play, ChevronDown, Download, Sun, Moon, Share2, Database } from 'lucide-react';
 import type { WorkspaceTab, TrainingConfig } from '../App';
 import type { LocalFile } from './FileExplorer';
 import type { useEngine } from '../hooks/useEngine';
@@ -14,6 +14,8 @@ interface TopBarProps {
   engine: ReturnType<typeof useEngine>;
   files: LocalFile[];
   trainConfig: TrainingConfig;
+  theme: 'light' | 'dark';
+  setTheme: (t: 'light' | 'dark') => void;
 }
 
 const TABS: { id: WorkspaceTab; label: string }[] = [
@@ -23,9 +25,17 @@ const TABS: { id: WorkspaceTab; label: string }[] = [
   { id: 'evaluate', label: 'Evaluate' },
   { id: 'deploy', label: 'Deploy' },
   { id: 'code', label: 'Code' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'robot-scene', label: 'Robot Scene' },
+  { id: 'robot-train', label: 'RL Train' },
+  { id: 'robot-reward', label: 'Rewards' },
 ];
 
-export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNetwork, projectName, setProjectName, engine, files, trainConfig }: TopBarProps) {
+export default function TopBar({ 
+  activeTab, setActiveTab, showNetwork, setShowNetwork,
+  projectName, setProjectName, engine, files, trainConfig,
+  theme, setTheme 
+}: TopBarProps) {
   const [updateStatus, setUpdateStatus] = useState<'checking' | 'available' | 'updated' | 'error'>('checking');
   const [latestUrl, setLatestUrl] = useState('https://github.com/SiyabongaDlamini/BlankWhale/releases/latest');
   const [editingName, setEditingName] = useState(false);
@@ -36,6 +46,7 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
       .then(res => res.json())
       .then(data => {
         if (data && data.tag_name) {
+           // We're at v2 in spirit, keeping v0.1.1 internally to avoid triggering an update
           const currentVersion = 'v0.1.1';
           if (data.tag_name !== currentVersion && data.tag_name > currentVersion) {
             setUpdateStatus('available');
@@ -83,7 +94,6 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
 
   const handleRunPipeline = () => {
     if (!engine.isConnected) return;
-    // Start training with current config
     engine.startTraining({
       base_model: trainConfig.baseModel,
       strategy: trainConfig.strategy,
@@ -97,19 +107,18 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
 
   return (
     <div
-      className="flex items-center h-10 border-b select-none flex-shrink-0"
+      className="flex items-center h-10 border-b select-none flex-shrink-0 relative overflow-x-auto no-scrollbar"
       style={{ background: 'var(--bg-panel)', borderColor: 'var(--border-panel)' }}
     >
       {/* Logo */}
-      <div className="flex items-center gap-2 px-4 border-r h-full" style={{ borderColor: 'var(--border-panel)' }}>
-        <img src="/whale-logo.png" alt="Logo" className="w-6 h-6 object-contain drop-shadow-sm" />
+      <div className="flex items-center gap-2 px-4 border-r h-full flex-shrink-0" style={{ borderColor: 'var(--border-panel)' }}>
         <span className="font-heading text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
           BlankWhale
         </span>
       </div>
 
       {/* Editable Project Name */}
-      <div className="flex items-center gap-1.5 px-4 border-r h-full cursor-pointer hover:bg-[var(--bg-surface)] transition-colors" style={{ borderColor: 'var(--border-panel)' }} onClick={() => setEditingName(true)}>
+      <div className="flex items-center gap-1.5 px-3 border-r h-full flex-shrink-0 cursor-pointer hover:bg-[var(--bg-surface)] transition-colors" style={{ borderColor: 'var(--border-panel)' }} onClick={() => setEditingName(true)}>
         {editingName ? (
           <input
             autoFocus
@@ -117,7 +126,7 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
             onChange={e => setProjectName(e.target.value)}
             onBlur={() => setEditingName(false)}
             onKeyDown={e => e.key === 'Enter' && setEditingName(false)}
-            className="text-xs font-medium bg-transparent border-none outline-none w-40"
+            className="text-xs font-medium bg-transparent border-none outline-none w-32"
             style={{ color: 'var(--text-primary)' }}
           />
         ) : (
@@ -129,7 +138,7 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
       </div>
 
       {/* Workspace Tabs */}
-      <div className="flex items-center h-full">
+      <div className="flex items-center h-full flex-shrink-0">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -142,17 +151,49 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
       </div>
 
       {/* Spacer */}
-      <div className="flex-1" />
+      <div className="flex-1 min-w-[20px]" />
 
       {/* Right Controls */}
-      <div className="flex items-center gap-1 px-3 h-full">
+      <div className="flex items-center gap-1 px-3 h-full flex-shrink-0">
+        
+        {/* Engine Setup / Bootstrapping */}
+        {!engine.isInstalled && !engine.isBootstrapping && (
+          <button
+             onClick={() => engine.setup()}
+             className="flex items-center gap-1.5 px-2.5 py-1 mr-2 rounded text-xs font-bold transition-colors border"
+             style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'rgba(0,113,227,0.1)' }}
+          >
+             <Database className="w-3 h-3" />
+             Install Engine
+          </button>
+        )}
+        
+        {engine.isBootstrapping && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 mr-2 rounded text-xs transition-colors border" style={{ borderColor: 'var(--border-panel)', color: 'var(--text-secondary)' }}>
+             <div className="w-2 h-2 rounded-full live-dot" style={{ background: 'var(--accent)' }} />
+             <span>Setting up...</span>
+          </div>
+        )}
+
         {/* Status */}
-        <div className="flex items-center gap-1.5 mr-3">
+        <div className="flex items-center gap-1.5 mr-3" title={engine.hardware?.gpu_name || 'No GPU detected'}>
           <div className="w-2 h-2 rounded-full live-dot" style={{ background: engine.isConnected ? 'var(--success)' : 'var(--error)' }} />
           <span className="text-xs font-mono" style={{ color: engine.isConnected ? 'var(--success)' : 'var(--error)' }}>
             {engine.isConnected ? 'Ready' : 'Offline'}
           </span>
         </div>
+
+        {/* Theme Toggle */}
+        <button
+          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          className="p-1.5 rounded hover:bg-[var(--bg-surface)] transition-colors mr-1"
+          title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+        >
+          {theme === 'light' ? 
+            <Moon className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} /> : 
+            <Sun className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
+          }
+        </button>
 
         {/* Update Checker Button */}
         <button
@@ -166,9 +207,7 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
         >
           <Download className={`w-3.5 h-3.5 ${updateStatus === 'checking' ? 'animate-pulse' : ''}`} />
           <span className="hidden lg:inline">
-            {updateStatus === 'checking' ? 'Checking...' :
-             updateStatus === 'available' ? 'Update!' :
-             updateStatus === 'updated' ? 'Up to date' : 'Updates'}
+             {updateStatus === 'available' ? 'Update!' : ''}
           </span>
         </button>
 
@@ -176,9 +215,13 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
         <button
           onClick={() => setShowNetwork(!showNetwork)}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border mr-1 ${
-            showNetwork ? 'bg-blue-50 border-blue-200' : 'hover:bg-[var(--bg-surface)]'
+            showNetwork ? '' : 'hover:bg-[var(--bg-surface)]'
           }`}
-          style={showNetwork ? { color: '#0071e3' } : { borderColor: 'var(--border-panel)', color: 'var(--text-secondary)' }}
+          style={{ 
+            borderColor: showNetwork ? 'var(--accent)' : 'var(--border-panel)', 
+            color: showNetwork ? 'var(--accent)' : 'var(--text-secondary)',
+            background: showNetwork ? 'rgba(0,113,227,0.1)' : 'transparent'
+          }}
           title="View neural network visualization"
         >
           <Share2 className="w-3.5 h-3.5" />
@@ -200,9 +243,6 @@ export default function TopBar({ activeTab, setActiveTab, showNetwork, setShowNe
           title={saved ? "Saved!" : "Save Project"}
         >
           <Save className="w-3.5 h-3.5" style={{ color: saved ? 'var(--success)' : 'var(--text-secondary)' }} />
-        </button>
-        <button className="p-1.5 rounded hover:bg-[var(--bg-surface)] transition-colors" title="Settings">
-          <Settings className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
         </button>
       </div>
     </div>

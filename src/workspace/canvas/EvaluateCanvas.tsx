@@ -10,6 +10,7 @@ interface Message {
 
 interface EvaluateCanvasProps {
   files?: LocalFile[];
+  selectedFile: string | null;
   engine: ReturnType<typeof useEngine>;
 }
 

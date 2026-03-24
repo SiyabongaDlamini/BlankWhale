@@ -1,250 +1,615 @@
 """
-BlankWhale Data Pipeline
-Load, clean, format, and tokenize datasets for training.
+BlankWhale v2 — Smart Document Extraction Pipeline
+Multi-format intelligent extraction that converts PDFs, DOCX, TXT, CSV,
+images, and scans into clean markdown + structured QA-ready data.
+
+Replaces the old raw-chunk approach with structure-aware extraction
+that preserves headers, tables, lists, and semantic boundaries.
 """
 
 import json
 import csv
+import re
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
+logger = logging.getLogger("blankwhale.pipeline")
+
+
+# ============================================================
+# Configuration
+# ============================================================
 
 @dataclass
 class DataConfig:
+    """Configuration for data extraction and tokenization."""
     train_file: str = "./data/train.jsonl"
     eval_file: Optional[str] = None
-    format: str = "alpaca"          # alpaca | sharegpt | completion
+    format: str = "alpaca"            # alpaca | sharegpt | completion
     max_seq_length: int = 2048
     num_workers: int = 4
     shuffle: bool = True
     validation_split: float = 0.1
 
 
-def load_pdf(path: Path) -> str:
-    """Extract and clean text from PDF using PyMuPDF."""
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
-        raise ImportError("PyMuPDF not found. Install with: pip install pymupdf")
-
-    doc = fitz.open(path)
-    text_blocks = []
-    for page in doc:
-        # Extract text as blocks to better preserve structure
-        blocks = page.get_text("blocks")
-        for b in blocks:
-            # b[4] is the text content of the block
-            block_text = b[4].strip()
-            if block_text:
-                text_blocks.append(block_text)
-    doc.close()
-    
-    # Join blocks and normalize whitespace
-    combined_text = "\n\n".join(text_blocks)
-    import re
-    # Remove multiple spaces and normalize newlines
-    combined_text = re.sub(r' +', ' ', combined_text)
-    combined_text = re.sub(r'\n{3,}', '\n\n', combined_text)
-    
-    return combined_text.strip()
+@dataclass
+class ExtractionResult:
+    """Result from extracting a single document."""
+    source: str                        # Original file path
+    format: str                        # File type (pdf, docx, txt, csv, image)
+    markdown: str                      # Clean extracted markdown text
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    pages: int = 0
+    word_count: int = 0
+    has_tables: bool = False
+    has_images: bool = False
 
 
-def chunk_text(text: str, chunk_size: int = 1024, overlap: int = 200) -> list[str]:
+# ============================================================
+# Multi-Format Loader
+# ============================================================
+
+def extract_document(path: str) -> ExtractionResult:
     """
-    Split text into overlapping chunks, attempting to keep paragraphs together.
+    Intelligently extract text from any supported document format.
+    Returns clean markdown with preserved structure.
+    
+    Supported formats: PDF, DOCX, TXT, CSV, MD, JSON, JSONL, images (OCR)
     """
-    if not text or len(text) <= chunk_size:
-        return [text] if text else []
-
-    # Try to split by double newlines (paragraphs) first
-    paragraphs = text.split("\n\n")
-    chunks = []
-    current_chunk = ""
-
-    for p in paragraphs:
-        p = p.strip()
-        if not p:
-            continue
-            
-        # If adding this paragraph exceeds chunk_size, save current_chunk
-        if current_chunk and len(current_chunk) + len(p) > chunk_size:
-            chunks.append(current_chunk.strip())
-            # Start new chunk with some overlap if possible
-            overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
-            current_chunk = overlap_text + "\n\n" + p
-        else:
-            if current_chunk:
-                current_chunk += "\n\n" + p
-            else:
-                current_chunk = p
-                
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-
-    # If any chunk is still too large (e.g. one giant paragraph), handle it with hard splits
-    final_chunks = []
-    for c in chunks:
-        if len(c) > chunk_size + overlap:
-            # Fallback to character-based split for huge blocks
-            sub_start = 0
-            while sub_start < len(c):
-                sub_end = sub_start + chunk_size
-                final_chunks.append(c[sub_start:sub_end])
-                sub_start += (chunk_size - overlap)
-                if len(c) - sub_start < overlap:
-                    break
-        else:
-            final_chunks.append(c)
-
-    return final_chunks
-
-
-def load_raw_data(path: str, chunk_size: int = 4000, overlap: int = 400) -> list[dict]:
-    """Load raw data from file."""
     p = Path(path)
     if not p.exists():
-        raise FileNotFoundError(f"Data file not found: {path}")
-
-    if p.suffix == ".jsonl":
-        data = []
-        with open(p, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    data.append(json.loads(line))
-        return data
-
-    elif p.suffix == ".json":
-        with open(p, encoding="utf-8") as f:
-            result = json.load(f)
-            return result if isinstance(result, list) else [result]
-
-    elif p.suffix == ".csv":
-        data = []
-        with open(p, encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                data.append(dict(row))
-        return data
-
-    elif p.suffix == ".txt":
-        with open(p, encoding="utf-8") as f:
-            text = f.read()
-            chunks = chunk_text(text, chunk_size, overlap)
-            return [{"text": c} for c in chunks]
-
-    elif p.suffix == ".pdf":
-        text = load_pdf(p)
-        chunks = chunk_text(text, chunk_size, overlap)
-        return [{"text": c} for c in chunks]
-
-    else:
-        raise ValueError(f"Unsupported file format: {p.suffix}")
+        raise FileNotFoundError(f"File not found: {path}")
+    
+    ext = p.suffix.lower()
+    
+    extractors = {
+        ".pdf": _extract_pdf,
+        ".docx": _extract_docx,
+        ".doc": _extract_docx,
+        ".txt": _extract_text,
+        ".md": _extract_text,
+        ".csv": _extract_csv,
+        ".json": _extract_json,
+        ".jsonl": _extract_jsonl,
+        ".png": _extract_image,
+        ".jpg": _extract_image,
+        ".jpeg": _extract_image,
+        ".tiff": _extract_image,
+        ".bmp": _extract_image,
+    }
+    
+    extractor = extractors.get(ext)
+    if extractor is None:
+        raise ValueError(f"Unsupported file format: {ext}")
+    
+    logger.info(f"Extracting {ext} document: {p.name}")
+    return extractor(p)
 
 
-def format_alpaca(example: dict) -> str:
-    """Format in Alpaca instruction style."""
-    instruction = example.get("instruction", "")
-    input_text = example.get("input", "")
-    output_text = example.get("output", "")
-
-    if input_text:
-        return (
-            f"### Instruction:\n{instruction}\n\n"
-            f"### Input:\n{input_text}\n\n"
-            f"### Response:\n{output_text}"
-        )
-    return (
-        f"### Instruction:\n{instruction}\n\n"
-        f"### Response:\n{output_text}"
+def _extract_pdf(path: Path) -> ExtractionResult:
+    """
+    Extract structured text from PDF using pdfplumber (tables/layout)
+    with PyMuPDF fallback for text-heavy documents.
+    
+    Strategy:
+    1. Try pdfplumber first for tables and structured content
+    2. Fall back to PyMuPDF block-based extraction
+    3. Preserve headers, paragraphs, and table structure as markdown
+    """
+    markdown_parts = []
+    page_count = 0
+    has_tables = False
+    
+    # --- Primary: pdfplumber (best for tables + layout) ---
+    try:
+        import pdfplumber
+        
+        with pdfplumber.open(path) as pdf:
+            page_count = len(pdf.pages)
+            
+            for i, page in enumerate(pdf.pages):
+                page_md = []
+                
+                # Extract tables first
+                tables = page.extract_tables()
+                if tables:
+                    has_tables = True
+                    for table in tables:
+                        page_md.append(_table_to_markdown(table))
+                
+                # Extract text (excluding table areas for cleaner output)
+                text = page.extract_text(
+                    x_tolerance=2,
+                    y_tolerance=3,
+                    layout=True
+                )
+                
+                if text:
+                    cleaned = _clean_extracted_text(text)
+                    if cleaned:
+                        page_md.append(cleaned)
+                
+                if page_md:
+                    markdown_parts.append(f"\n\n".join(page_md))
+        
+        logger.info(f"pdfplumber extracted {page_count} pages")
+        
+    except ImportError:
+        logger.warning("pdfplumber not found, falling back to PyMuPDF")
+        return _extract_pdf_pymupdf(path)
+    except Exception as e:
+        logger.warning(f"pdfplumber failed ({e}), falling back to PyMuPDF")
+        return _extract_pdf_pymupdf(path)
+    
+    full_markdown = "\n\n---\n\n".join(markdown_parts)
+    full_markdown = _normalize_markdown(full_markdown)
+    
+    return ExtractionResult(
+        source=str(path),
+        format="pdf",
+        markdown=full_markdown,
+        pages=page_count,
+        word_count=len(full_markdown.split()),
+        has_tables=has_tables,
     )
 
 
-def format_sharegpt(example: dict) -> list[dict]:
-    """Format ShareGPT conversations."""
-    conversations = example.get("conversations", [])
-    return [
-        {"role": turn.get("from", "user"), "content": turn.get("value", "")}
-        for turn in conversations
-    ]
-
-
-def format_completion(example: dict) -> str:
-    """Simple text completion format."""
-    return example.get("text", "")
-
-
-FORMATTERS = {
-    "alpaca": format_alpaca,
-    "sharegpt": format_sharegpt,
-    "completion": format_completion,
-}
-
-
-def preprocess_data(config: DataConfig) -> dict:
-    """
-    Full preprocessing pipeline.
+def _extract_pdf_pymupdf(path: Path) -> ExtractionResult:
+    """Fallback PDF extraction using PyMuPDF (fitz)."""
+    try:
+        import fitz
+    except ImportError:
+        raise ImportError("Neither pdfplumber nor PyMuPDF found. Install: pip install pdfplumber pymupdf")
     
-    Returns:
-        dict with 'train' and optionally 'eval' splits
-    """
-    print(f"Loading data from {config.train_file}...")
-    # Map max_seq_length to rough character chunk size (approx 4 chars/token)
-    chunk_size = config.max_seq_length * 4
-    overlap = int(chunk_size * 0.15)
+    doc = fitz.open(path)
+    markdown_parts = []
     
-    raw_data = load_raw_data(config.train_file, chunk_size=chunk_size, overlap=overlap)
-    print(f"Loaded {len(raw_data)} chunks/examples")
+    for page in doc:
+        blocks = page.get_text("dict")["blocks"]
+        page_lines = []
+        
+        for block in blocks:
+            if block["type"] == 0:  # Text block
+                for line in block.get("lines", []):
+                    spans = line.get("spans", [])
+                    line_text = " ".join(s["text"].strip() for s in spans if s["text"].strip())
+                    
+                    if not line_text:
+                        continue
+                    
+                    # Detect headers by font size
+                    max_size = max((s.get("size", 12) for s in spans), default=12)
+                    is_bold = any(s.get("flags", 0) & 2 for s in spans)
+                    
+                    if max_size >= 18:
+                        page_lines.append(f"# {line_text}")
+                    elif max_size >= 14 or is_bold:
+                        page_lines.append(f"## {line_text}")
+                    else:
+                        page_lines.append(line_text)
+        
+        if page_lines:
+            markdown_parts.append("\n".join(page_lines))
+    
+    doc.close()
+    
+    full_markdown = "\n\n---\n\n".join(markdown_parts)
+    full_markdown = _normalize_markdown(full_markdown)
+    
+    return ExtractionResult(
+        source=str(path),
+        format="pdf",
+        markdown=full_markdown,
+        pages=len(doc) if hasattr(doc, '__len__') else 0,
+        word_count=len(full_markdown.split()),
+    )
 
-    formatter = FORMATTERS.get(config.format, format_alpaca)
 
-    # Format all examples
-    formatted = []
-    skipped = 0
-    for example in raw_data:
+def _extract_docx(path: Path) -> ExtractionResult:
+    """Extract text from DOCX with headings, lists, and tables."""
+    try:
+        from docx import Document
+    except ImportError:
+        raise ImportError("python-docx not found. Install: pip install python-docx")
+    
+    doc = Document(path)
+    markdown_parts = []
+    has_tables = False
+    
+    for element in doc.element.body:
+        tag = element.tag.split("}")[-1]
+        
+        if tag == "p":
+            # Process paragraphs
+            for para in doc.paragraphs:
+                if para._element is element:
+                    text = para.text.strip()
+                    if not text:
+                        continue
+                    
+                    style = para.style.name.lower() if para.style else ""
+                    
+                    if "heading 1" in style:
+                        markdown_parts.append(f"# {text}")
+                    elif "heading 2" in style:
+                        markdown_parts.append(f"## {text}")
+                    elif "heading 3" in style:
+                        markdown_parts.append(f"### {text}")
+                    elif "list" in style:
+                        markdown_parts.append(f"- {text}")
+                    else:
+                        markdown_parts.append(text)
+                    break
+        
+        elif tag == "tbl":
+            has_tables = True
+            for table in doc.tables:
+                if table._element is element:
+                    rows = []
+                    for row in table.rows:
+                        cells = [cell.text.strip() for cell in row.cells]
+                        rows.append(cells)
+                    if rows:
+                        markdown_parts.append(_table_to_markdown(rows))
+                    break
+    
+    full_markdown = "\n\n".join(markdown_parts)
+    full_markdown = _normalize_markdown(full_markdown)
+    
+    return ExtractionResult(
+        source=str(path),
+        format="docx",
+        markdown=full_markdown,
+        word_count=len(full_markdown.split()),
+        has_tables=has_tables,
+    )
+
+
+def _extract_text(path: Path) -> ExtractionResult:
+    """Extract plain text or markdown files."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    text = _normalize_markdown(text)
+    
+    return ExtractionResult(
+        source=str(path),
+        format="txt",
+        markdown=text,
+        word_count=len(text.split()),
+    )
+
+
+def _extract_csv(path: Path) -> ExtractionResult:
+    """Convert CSV to markdown table."""
+    rows = []
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            rows.append(row)
+    
+    if not rows:
+        return ExtractionResult(source=str(path), format="csv", markdown="")
+    
+    md = _table_to_markdown(rows)
+    
+    return ExtractionResult(
+        source=str(path),
+        format="csv",
+        markdown=md,
+        word_count=len(md.split()),
+        has_tables=True,
+    )
+
+
+def _extract_json(path: Path) -> ExtractionResult:
+    """Extract JSON into readable markdown."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    
+    if isinstance(data, list):
+        md_parts = []
+        for i, item in enumerate(data[:100]):  # Cap at 100 items
+            md_parts.append(f"### Record {i+1}\n```json\n{json.dumps(item, indent=2, ensure_ascii=False)}\n```")
+        md = "\n\n".join(md_parts)
+    else:
+        md = f"```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+    
+    return ExtractionResult(
+        source=str(path),
+        format="json",
+        markdown=md,
+        word_count=len(md.split()),
+    )
+
+
+def _extract_jsonl(path: Path) -> ExtractionResult:
+    """Extract JSONL into readable markdown."""
+    lines = path.read_text(encoding="utf-8").strip().split("\n")
+    md_parts = []
+    
+    for i, line in enumerate(lines[:100]):  # Cap at 100
         try:
-            result = formatter(example)
-            if result:
-                formatted.append(result)
-        except Exception:
-            skipped += 1
-
-    if skipped > 0:
-        print(f"Skipped {skipped} malformed examples")
-
-    print(f"Formatted {len(formatted)} examples using '{config.format}' format")
-
-    # Split into train/eval
-    if config.eval_file:
-        eval_raw = load_raw_data(config.eval_file, chunk_size=chunk_size, overlap=overlap)
-        eval_formatted = [formatter(ex) for ex in eval_raw]
-        return {"train": formatted, "eval": eval_formatted}
-
-    elif config.validation_split > 0:
-        split_idx = int(len(formatted) * (1 - config.validation_split))
-        return {
-            "train": formatted[:split_idx],
-            "eval": formatted[split_idx:],
-        }
-
-    return {"train": formatted, "eval": []}
+            item = json.loads(line)
+            md_parts.append(f"### Record {i+1}\n```json\n{json.dumps(item, indent=2, ensure_ascii=False)}\n```")
+        except json.JSONDecodeError:
+            continue
+    
+    md = "\n\n".join(md_parts)
+    
+    return ExtractionResult(
+        source=str(path),
+        format="jsonl",
+        markdown=md,
+        word_count=len(md.split()),
+    )
 
 
-def tokenize_dataset(data: list, tokenizer, max_length: int = 2048) -> list[dict]:
-    """Tokenize a list of text examples."""
-    tokenized = []
-    for item in data:
-        text = item if isinstance(item, str) else json.dumps(item)
-        tokens = tokenizer(
-            text,
-            max_length=max_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
-        tokenized.append({
-            "input_ids": tokens["input_ids"].squeeze(),
-            "attention_mask": tokens["attention_mask"].squeeze(),
-        })
-    return tokenized
+def _extract_image(path: Path) -> ExtractionResult:
+    """Extract text from images using OCR (pytesseract)."""
+    try:
+        from PIL import Image
+        import pytesseract
+    except ImportError:
+        raise ImportError("OCR deps missing. Install: pip install Pillow pytesseract")
+    
+    image = Image.open(path)
+    text = pytesseract.image_to_string(image)
+    text = _normalize_markdown(text.strip())
+    
+    return ExtractionResult(
+        source=str(path),
+        format="image",
+        markdown=text,
+        word_count=len(text.split()),
+        has_images=True,
+    )
+
+
+# ============================================================
+# Semantic Chunking
+# ============================================================
+
+def chunk_by_semantic_boundaries(
+    markdown: str,
+    chunk_size: int = 1024,
+    overlap: int = 128,
+) -> List[str]:
+    """
+    Split markdown into chunks using semantic boundaries.
+    
+    Strategy:
+    1. Split on markdown headers (# ## ###)
+    2. Then split on paragraph boundaries (double newlines)
+    3. Only fall back to character-level splits for very long paragraphs
+    
+    This preserves context much better than raw character chunking.
+    """
+    if not markdown or len(markdown) <= chunk_size:
+        return [markdown] if markdown else []
+    
+    # Split on headers first
+    sections = re.split(r'\n(?=#{1,3}\s)', markdown)
+    
+    chunks = []
+    current_chunk = ""
+    
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+        
+        # If the section fits, add it
+        if len(current_chunk) + len(section) + 2 <= chunk_size:
+            current_chunk = (current_chunk + "\n\n" + section).strip()
+        else:
+            # Save current chunk
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            # If section itself is too long, split by paragraphs
+            if len(section) > chunk_size:
+                sub_chunks = _split_long_section(section, chunk_size, overlap)
+                chunks.extend(sub_chunks[:-1])
+                current_chunk = sub_chunks[-1] if sub_chunks else ""
+            else:
+                # Start new chunk with overlap from previous
+                if chunks:
+                    overlap_text = chunks[-1][-overlap:]
+                    current_chunk = overlap_text + "\n\n" + section
+                else:
+                    current_chunk = section
+    
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    return chunks
+
+
+def _split_long_section(text: str, chunk_size: int, overlap: int) -> List[str]:
+    """Split a long section by paragraphs, then by sentences."""
+    paragraphs = text.split("\n\n")
+    chunks = []
+    current = ""
+    
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        
+        if len(current) + len(para) + 2 <= chunk_size:
+            current = (current + "\n\n" + para).strip()
+        else:
+            if current:
+                chunks.append(current)
+            
+            if len(para) > chunk_size:
+                # Last resort: split by sentences
+                sentences = re.split(r'(?<=[.!?])\s+', para)
+                current = ""
+                for sent in sentences:
+                    if len(current) + len(sent) + 1 <= chunk_size:
+                        current = (current + " " + sent).strip()
+                    else:
+                        if current:
+                            chunks.append(current)
+                        current = sent
+            else:
+                current = para
+    
+    if current.strip():
+        chunks.append(current.strip())
+    
+    return chunks
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def _table_to_markdown(rows: List[List[str]]) -> str:
+    """Convert a list of rows into a markdown table."""
+    if not rows:
+        return ""
+    
+    # Clean cells
+    clean_rows = []
+    for row in rows:
+        clean_rows.append([str(cell).strip().replace("|", "\\|") if cell else "" for cell in row])
+    
+    # Header
+    header = "| " + " | ".join(clean_rows[0]) + " |"
+    separator = "| " + " | ".join(["---"] * len(clean_rows[0])) + " |"
+    
+    # Body
+    body_lines = []
+    for row in clean_rows[1:]:
+        # Pad row to match header length
+        while len(row) < len(clean_rows[0]):
+            row.append("")
+        body_lines.append("| " + " | ".join(row[:len(clean_rows[0])]) + " |")
+    
+    return "\n".join([header, separator] + body_lines)
+
+
+def _clean_extracted_text(text: str) -> str:
+    """Clean raw extracted text: fix encoding, remove artifacts."""
+    if not text:
+        return ""
+    
+    # Remove page numbers / headers that are just numbers
+    text = re.sub(r'^\s*\d+\s*$', '', text, flags=re.MULTILINE)
+    # Remove excessive whitespace
+    text = re.sub(r'[ \t]+', ' ', text)
+    # Normalize line breaks
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    # Remove leading/trailing whitespace per line
+    lines = [line.strip() for line in text.split('\n')]
+    text = '\n'.join(lines)
+    
+    return text.strip()
+
+
+def _normalize_markdown(text: str) -> str:
+    """Final normalization pass on extracted markdown."""
+    if not text:
+        return ""
+    
+    # Fix broken unicode
+    text = text.encode("utf-8", errors="replace").decode("utf-8")
+    # Remove null bytes
+    text = text.replace("\x00", "")
+    # Normalize whitespace
+    text = re.sub(r'\n{4,}', '\n\n\n', text)
+    text = re.sub(r' {3,}', '  ', text)
+    
+    return text.strip()
+
+
+# ============================================================
+# Legacy Compatibility — load_raw_data / format functions
+# ============================================================
+
+def load_raw_data(file_path: str, chunk_size: int = 1024, overlap: int = 128) -> List[str]:
+    """
+    High-level function: extract a document and return semantic chunks.
+    This replaces the old raw chunking approach entirely.
+    """
+    result = extract_document(file_path)
+    chunks = chunk_by_semantic_boundaries(result.markdown, chunk_size, overlap)
+    logger.info(f"Extracted {len(chunks)} chunks from {Path(file_path).name} "
+                f"({result.word_count} words, {result.pages} pages)")
+    return chunks
+
+
+def format_for_training(
+    chunks: List[str],
+    format_type: str = "completion",
+    system_prompt: str = "You are a helpful assistant.",
+) -> List[Dict[str, str]]:
+    """
+    Convert text chunks into training-ready format.
+    
+    Formats:
+    - completion: {"text": "..."}
+    - alpaca: {"instruction": "...", "input": "", "output": "..."}
+    - sharegpt: {"conversations": [{"from": "human", ...}, {"from": "gpt", ...}]}
+    """
+    records = []
+    
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        
+        if format_type == "completion":
+            records.append({"text": chunk})
+        
+        elif format_type == "alpaca":
+            records.append({
+                "instruction": "Read and understand the following content:",
+                "input": "",
+                "output": chunk,
+            })
+        
+        elif format_type == "sharegpt":
+            records.append({
+                "conversations": [
+                    {"from": "human", "value": "Explain the following content:"},
+                    {"from": "gpt", "value": chunk},
+                ]
+            })
+    
+    return records
+
+
+def save_training_data(records: List[Dict], output_path: str = "./data/train.jsonl"):
+    """Save formatted records to JSONL."""
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, "w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    
+    logger.info(f"Saved {len(records)} training records to {output_path}")
+
+def preprocess_data(config: DataConfig):
+    """Legacy compatibility: load prepared dataset for training."""
+    from datasets import load_dataset
+    import os
+    
+    data_files = {"train": config.train_file}
+    if config.eval_file and os.path.exists(config.eval_file):
+        data_files["eval"] = config.eval_file
+        
+    if not os.path.exists(config.train_file):
+        # Create a dummy to prevent crashes on init, or raise error if training
+        logger.warning(f"Training file {config.train_file} not found. Creating a minimal dummy dataset.")
+        Path(config.train_file).parent.mkdir(parents=True, exist_ok=True)
+        with open(config.train_file, "w") as f:
+            f.write(json.dumps({"text": "dummy data"}) + "\n")
+            
+    dataset = load_dataset("json", data_files=data_files)
+    
+    if config.shuffle and "train" in dataset:
+        dataset["train"] = dataset["train"].shuffle(seed=42)
+        
+    return dataset

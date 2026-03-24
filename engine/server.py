@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import signal
+import os
 from typing import Optional
 
 logger = logging.getLogger("blankwhale.server")
@@ -96,6 +97,25 @@ class MetricsServer:
                 preview_config = msg.get("config", {})
                 asyncio.create_task(self._preview_data(websocket, preview_config))
 
+            elif command == "extract_document":
+                extract_config = msg.get("config", {})
+                asyncio.create_task(self._extract_document(websocket, extract_config))
+
+            elif command == "redact_pii":
+                pii_config = msg.get("config", {})
+                asyncio.create_task(self._redact_pii(websocket, pii_config))
+
+            elif command == "generate_qa":
+                qa_config = msg.get("config", {})
+                asyncio.create_task(self._generate_qa(websocket, qa_config))
+
+            elif command == "list_templates":
+                from .qa_generator import list_templates
+                await websocket.send(json.dumps({
+                    "event": "templates_list",
+                    "data": {"templates": list_templates()},
+                }))
+
             else:
                 await websocket.send(json.dumps({
                     "event": "error",
@@ -110,6 +130,8 @@ class MetricsServer:
 
     async def _run_training(self, config: dict):
         """Run training in a background thread."""
+        logger.info(f"TRAIN: Config received: {config}")
+        logger.info(f"TRAIN: CWD='{os.getcwd()}', ENV_DATA_DIR='{os.environ.get('BLANKWHALE_DATA_DIR')}'")
         from .trainer import TrainingConfig, BlankWhaleTrainer
 
         training_config = TrainingConfig(**config) if config else TrainingConfig()
@@ -227,12 +249,14 @@ class MetricsServer:
             }))
 
             def download():
-                import os
                 from datasets import load_dataset
-
+                
+                data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+                data_path = os.path.join(data_dir, "data")
+                os.makedirs(data_path, exist_ok=True)
+                
                 ds = load_dataset(dataset_name, split=split)
-                os.makedirs("./data", exist_ok=True)
-                output_path = f"./data/{dataset_name.replace('/', '_')}_{split}.jsonl"
+                output_path = os.path.join(data_path, f"{dataset_name.replace('/', '_')}_{split}.jsonl")
                 ds.to_json(output_path)
                 return {
                     "path": output_path,
@@ -257,22 +281,39 @@ class MetricsServer:
     async def _preview_data(self, websocket, config: dict):
         """Preview data extraction and chunking for the UI."""
         path = config.get("path", "")
+        data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+        logger.info(f"PREVIEW: Requested path='{path}', BLANKWHALE_DATA_DIR='{data_dir}', CWD='{os.getcwd()}'")
+        data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+        
+        if path and not os.path.isabs(path):
+            # Try resolving against AppData/data if it looks like a simple name or ./data
+            if path.startswith("./data/"):
+                path = os.path.join(data_dir, path.lstrip("./"))
+            else:
+                path = os.path.join(data_dir, "data", path)
+
         chunk_size = config.get("chunk_size", 1024)
-        overlap = config.get("overlap", 200)
+        overlap = config.get("overlap", 128)
 
         if not path:
             return
 
-        from .data_pipeline import load_raw_data
+        from .data_pipeline import extract_document, chunk_by_semantic_boundaries
         loop = asyncio.get_event_loop()
         try:
-            # Use same loader logic as training
             def load():
-                # Provide a limited preview (first few chunks)
-                data = load_raw_data(path, chunk_size=chunk_size, overlap=overlap)
+                result = extract_document(path)
+                chunks = chunk_by_semantic_boundaries(
+                    result.markdown, chunk_size=chunk_size, overlap=overlap
+                )
                 return {
-                    "chunks": [d.get("text", "") for d in data[:10]],
-                    "total_chunks": len(data),
+                    "markdown": result.markdown[:5000],   # First 5k chars for preview
+                    "chunks": chunks[:10],
+                    "total_chunks": len(chunks),
+                    "word_count": result.word_count,
+                    "pages": result.pages,
+                    "format": result.format,
+                    "has_tables": result.has_tables,
                 }
 
             result = await loop.run_in_executor(None, load)
@@ -284,6 +325,139 @@ class MetricsServer:
             await websocket.send(json.dumps({
                 "event": "error",
                 "data": {"message": f"Preview failed: {e}"},
+            }))
+
+    async def _extract_document(self, websocket, config: dict):
+        """Full document extraction with smart pipeline."""
+        path = config.get("path", "")
+        data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+        if path and not os.path.isabs(path):
+            if path.startswith("./data/"):
+                path = os.path.join(data_dir, path.lstrip("./"))
+            else:
+                path = os.path.join(data_dir, "data", path)
+
+        redact = config.get("redact_pii", False)
+        redact_strategy = config.get("pii_strategy", "redact")
+
+        if not path:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": "No file path provided."},
+            }))
+            return
+
+        from .data_pipeline import extract_document
+        loop = asyncio.get_event_loop()
+        try:
+            def extract():
+                result = extract_document(path)
+                markdown = result.markdown
+
+                pii_info = {}
+                if redact:
+                    from .pii_redactor import redact_pii
+                    pii_result = redact_pii(markdown, strategy=redact_strategy)
+                    markdown = pii_result.cleaned_text
+                    pii_info = {
+                        "total_redacted": pii_result.total_redacted,
+                        "categories": pii_result.categories_found,
+                    }
+
+                return {
+                    "markdown": markdown,
+                    "word_count": result.word_count,
+                    "pages": result.pages,
+                    "format": result.format,
+                    "has_tables": result.has_tables,
+                    "pii": pii_info,
+                }
+
+            result = await loop.run_in_executor(None, extract)
+            await websocket.send(json.dumps({
+                "event": "extraction_result",
+                "data": result,
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": f"Extraction failed: {e}"},
+            }))
+
+    async def _redact_pii(self, websocket, config: dict):
+        """Scan and redact PII from text."""
+        text = config.get("text", "")
+        strategy = config.get("strategy", "redact")
+
+        if not text:
+            return
+
+        from .pii_redactor import redact_pii
+        loop = asyncio.get_event_loop()
+        try:
+            def run_redaction():
+                result = redact_pii(text, strategy=strategy)
+                return {
+                    "cleaned_text": result.cleaned_text,
+                    "total_redacted": result.total_redacted,
+                    "categories": result.categories_found,
+                    "matches": [
+                        {"category": m.category, "original": m.original, "replacement": m.replacement}
+                        for m in result.matches
+                    ],
+                }
+
+            result = await loop.run_in_executor(None, run_redaction)
+            await websocket.send(json.dumps({
+                "event": "pii_result",
+                "data": result,
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": f"PII redaction failed: {e}"},
+            }))
+
+    async def _generate_qa(self, websocket, config: dict):
+        """Generate QA training pairs from chunks."""
+        chunks = config.get("chunks", [])
+        template_name = config.get("template", "knowledge_base")
+        format_type = config.get("format", "alpaca")
+        pairs_per_chunk = config.get("pairs_per_chunk", 2)
+
+        if not chunks:
+            return
+
+        from .qa_generator import generate_qa_pairs
+        from .data_pipeline import save_training_data
+        loop = asyncio.get_event_loop()
+        try:
+            def generate():
+                records = generate_qa_pairs(
+                    chunks, template_name=template_name,
+                    format_type=format_type, pairs_per_chunk=pairs_per_chunk,
+                )
+                data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+                output_dir = os.path.join(data_dir, "data")
+                os.makedirs(output_dir, exist_ok=True)
+                output = os.path.join(output_dir, f"train_{template_name}.jsonl")
+                save_training_data(records, output)
+                return {
+                    "total_pairs": len(records),
+                    "output_path": output,
+                    "template": template_name,
+                    "format": format_type,
+                }
+
+            result = await loop.run_in_executor(None, generate)
+            await websocket.send(json.dumps({
+                "event": "qa_generated",
+                "data": result,
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "event": "error",
+                "data": {"message": f"QA generation failed: {e}"},
             }))
 
     async def _broadcast(self, message: str):
@@ -305,6 +479,8 @@ class MetricsServer:
             return
 
         logger.info(f"BlankWhale engine starting on ws://{self.host}:{self.port}")
+        data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+        os.makedirs(os.path.join(data_dir, "data"), exist_ok=True)
         self._loop = asyncio.get_running_loop()
         self._server = await websockets.serve(self.handler, self.host, self.port)
         logger.info("Engine ready. Waiting for connections...")
@@ -318,11 +494,19 @@ class MetricsServer:
 
 def start_server(host: str = "127.0.0.1", port: int = 9876):
     """Entry point to start the BlankWhale training engine."""
+    data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+    log_file = os.path.join(data_dir, "engine.log")
+    
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(message)s",
         datefmt="%H:%M:%S",
+        handlers=[
+            logging.FileHandler(log_file, mode='a', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
     )
+    logger.info(f"Logging to {log_file}")
 
     server = MetricsServer(host=host, port=port)
 

@@ -1,0 +1,13 @@
+{
+  "name": "Internal Knowledge Base",
+  "description": "Generate factual Q&A from internal documentation, manuals, and standard operating procedures.",
+  "system_prompt": "You are a helpful assistant with expertise in the following domain. Answer questions based on the provided documentation.",
+  "instruction_templates": [
+    "What is described in the following passage?\n\n{text}",
+    "Summarize the key points:\n\n{text}",
+    "Based on the following information, answer comprehensively:\n\n{text}",
+    "Explain the following concept or process:\n\n{text}",
+    "What are the main takeaways from this text?\n\n{text}"
+  ],
+  "format": "alpaca"
+}

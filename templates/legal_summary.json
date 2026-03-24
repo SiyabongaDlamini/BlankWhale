@@ -1,0 +1,12 @@
+{
+  "name": "Legal Summarization",
+  "description": "Generate legal summary pairs from legislation, contracts, and court documents.",
+  "system_prompt": "You are a legal assistant. Provide clear, accurate summaries of legal documents and explain legal implications in plain language.",
+  "instruction_templates": [
+    "Summarize the following legal provision in plain language:\n\n{text}",
+    "What are the key obligations defined in this clause?\n\n{text}",
+    "Explain the legal implications of the following:\n\n{text}",
+    "What rights and responsibilities are outlined here?\n\n{text}"
+  ],
+  "format": "alpaca"
+}

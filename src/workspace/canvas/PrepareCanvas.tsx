@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import type { LocalFile } from '../FileExplorer';
+import { appDataDir, join } from '@tauri-apps/api/path';
 
 
-export default function PrepareCanvas({ files = [], engine }: { files?: LocalFile[], engine: any }) {
+export default function PrepareCanvas({ files = [], selectedFile, engine }: { files?: LocalFile[], selectedFile: string | null, engine: any }) {
   const [chunkSize, setChunkSize] = useState(512);
   const [overlap, setOverlap] = useState(64);
   const [realText, setRealText] = useState('Please select a file on the left to preview its extracted text.');
@@ -10,20 +11,34 @@ export default function PrepareCanvas({ files = [], engine }: { files?: LocalFil
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const textFile = files.find(f => ['txt', 'csv', 'json', 'pdf'].includes(f.type));
-    if (textFile && engine.isConnected) {
-      setLoading(true);
-      const path = textFile.name.includes('/') ? textFile.name : `./data/${textFile.name}`;
-      
-      engine.previewData(path, { chunk_size: chunkSize, overlap: overlap }, (result: any) => {
-        if (result.chunks && result.chunks.length > 0) {
-          setRealText(result.chunks.join('\n\n'));
-          setPreviewChunks(result.chunks);
+    const fetchPreview = async () => {
+      // Prioritize the user's selected file, or fallback to the first text file
+      const textFile = files.find(f => f.name === selectedFile) || 
+                       files.find(f => ['txt', 'csv', 'json', 'pdf'].includes(f.type));
+                       
+      if (textFile && engine.isConnected) {
+        setLoading(true);
+        let path = textFile.path;
+        if (!path && !textFile.name.includes('/')) {
+            const dataDir = await appDataDir();
+            path = await join(dataDir, 'data', textFile.name);
         }
-        setLoading(false);
-      });
-    }
-  }, [files, engine.isConnected, chunkSize, overlap]);
+        if (!path) {
+            path = textFile.name;
+        }
+        
+        console.log(`[Frontend] Previewing data from path: "${path}"`);
+        engine.previewData(path, { chunk_size: chunkSize, overlap: overlap }, (result: any) => {
+          if (result.chunks && result.chunks.length > 0) {
+            setRealText(result.chunks.join('\n\n'));
+            setPreviewChunks(result.chunks);
+          }
+          setLoading(false);
+        });
+      }
+    };
+    fetchPreview();
+  }, [files, selectedFile, engine.isConnected, chunkSize, overlap]);
 
   const COLORS = [
     'rgba(34, 211, 238, 0.15)',

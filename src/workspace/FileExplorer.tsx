@@ -1,4 +1,6 @@
-import { useRef } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { readFile, writeFile, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs';
+import { appDataDir, join } from '@tauri-apps/api/path';
 import {
   FileText, FileSpreadsheet, FileImage, FileAudio, Globe,
   ChevronRight, ChevronDown, FolderOpen, Plus, Search, Trash2
@@ -20,6 +22,7 @@ export interface LocalFile {
   rawSize: number;
   status: 'ready' | 'processing' | 'error';
   fileObj?: File;
+  path?: string;
 }
 
 const FILE_ICONS: Record<string, typeof FileText> = {
@@ -35,8 +38,6 @@ const FILE_ICONS: Record<string, typeof FileText> = {
 };
 
 export default function FileExplorer({ files, setFiles, selectedFile, setSelectedFile }: FileExplorerProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const formatSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -45,36 +46,50 @@ export default function FileExplorer({ files, setFiles, selectedFile, setSelecte
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const newFiles = Array.from(e.target.files).map(f => {
-        let ext = f.name.split('.').pop()?.toLowerCase() || 'txt';
-        if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) ext = 'image';
-        if (['mp3', 'wav', 'ogg'].includes(ext)) ext = 'audio';
-
-        return {
-          name: f.name,
-          type: ext,
-          size: formatSize(f.size),
-          rawSize: f.size,
-          status: 'ready' as const,
-          fileObj: f
-        };
+  const handleAddFile = async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [{
+          name: 'Data Files',
+          extensions: ['txt', 'csv', 'json', 'jsonl', 'pdf', 'docx', 'jpg', 'png', 'mp3', 'wav']
+        }]
       });
 
-      setFiles(prev => {
-        const existingNames = new Set(prev.map(p => p.name));
-        const filtered = newFiles.filter(nf => !existingNames.has(nf.name));
-        return [...prev, ...filtered];
-      });
-      
-      if (!selectedFile && newFiles.length > 0) {
-        setSelectedFile(newFiles[0].name);
+      if (selected && Array.isArray(selected)) {
+        for (const filePath of selected as string[]) {
+          const fileName = filePath.split('/').pop() || 'unknown';
+          let ext = fileName.split('.').pop()?.toLowerCase() || 'txt';
+          if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) ext = 'image';
+          if (['mp3', 'wav', 'ogg'].includes(ext)) ext = 'audio';
+
+          try {
+            const dataDir = await appDataDir();
+            const absPath = await join(dataDir, 'data', fileName);
+            const content = await readFile(filePath);
+            await mkdir('data', { baseDir: BaseDirectory.AppData, recursive: true });
+            await writeFile(`data/${fileName}`, content, { baseDir: BaseDirectory.AppData });
+            
+            setFiles(prev => {
+              if (prev.find(f => f.name === fileName)) return prev;
+              const newFiles = [...prev, {
+                name: fileName,
+                type: ext,
+                size: formatSize(content.length),
+                rawSize: content.length,
+                status: 'ready' as const,
+                path: absPath,
+              }];
+              if (!selectedFile) setSelectedFile(fileName);
+              return newFiles;
+            });
+          } catch (err) {
+            console.error(`Failed to copy file ${fileName}:`, err);
+          }
+        }
       }
-    }
-    // Reset input so the same file can be selected again if it was deleted
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    } catch (err) {
+      console.error('File dialog error:', err);
     }
   };
 
@@ -90,21 +105,13 @@ export default function FileExplorer({ files, setFiles, selectedFile, setSelecte
 
   return (
     <div className="h-full flex flex-col panel">
-      {/* Hidden File Input */}
-      <input 
-        type="file" 
-        multiple 
-        ref={fileInputRef} 
-        onChange={handleFileSelect} 
-        className="hidden" 
-      />
 
       {/* Header */}
       <div className="panel-header">
         <span className="panel-header-title">Files</span>
         <div className="flex gap-1">
           <button 
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleAddFile}
             className="p-1 rounded hover:bg-[var(--bg-elevated)] transition-colors"
             title="Add Files"
           >
@@ -132,7 +139,7 @@ export default function FileExplorer({ files, setFiles, selectedFile, setSelecte
             <div className="py-4 text-center px-4">
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No files uploaded.</p>
               <button 
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleAddFile}
                 className="mt-2 text-xs hover:underline"
                 style={{ color: 'var(--accent)' }}
               >

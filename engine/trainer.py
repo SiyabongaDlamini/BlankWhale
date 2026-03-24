@@ -58,6 +58,17 @@ class BlankWhaleTrainer:
 
     def __init__(self, config: TrainingConfig, on_metrics: Optional[Callable] = None):
         self.config = config
+        
+        # Resolve relative paths against BLANKWHALE_DATA_DIR
+        data_dir = os.environ.get("BLANKWHALE_DATA_DIR", ".")
+        
+        if self.config.train_file.startswith("./data"):
+            self.config.train_file = os.path.join(data_dir, self.config.train_file.lstrip("./"))
+        if self.config.eval_file and self.config.eval_file.startswith("./data"):
+            self.config.eval_file = os.path.join(data_dir, self.config.eval_file.lstrip("./"))
+        if self.config.output_dir.startswith("./output"):
+            self.config.output_dir = os.path.join(data_dir, self.config.output_dir.lstrip("./"))
+            
         self.on_metrics = on_metrics  # Callback to send metrics to UI
         self.model = None
         self.tokenizer = None

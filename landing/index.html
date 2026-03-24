@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlankWhale — Your Local AI Training Studio</title>
+    <meta name="description" content="Train LLMs locally with one click. Premium, professional, and private.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="logo">
+                <span class="logo-icon">🐋</span>
+                <span class="logo-text">BlankWhale</span>
+            </div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#download" class="btn-primary">Download</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="container grid">
+            <div class="hero-content">
+                <h1 class="reveal-text">Local LLM Training.<br><span class="accent">Simplified.</span></h1>
+                <p class="reveal-text delay-1">The professional AI studio that runs entirely on your machine. One-click setup, high-end PDF extraction, and private-by-design training.</p>
+                <div class="hero-actions reveal-fade delay-2">
+                    <a href="#download" id="hero-download-btn" class="btn-large">Download for macOS</a>
+                    <span class="subtext">v0.1.1 — Stable</span>
+                </div>
+            </div>
+            <div class="hero-visual reveal-fade delay-3">
+                <div class="glass-frame">
+                    <img src="hero.png" alt="BlankWhale Hero" class="hero-img">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Professional Training, Redefined.</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="icon">⚡️</div>
+                    <h3>One-Click Setup</h3>
+                    <p>No more terminal wrestling. A single click installs the entire AI environment, including PyTorch and dependencies.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">📄</div>
+                    <h3>Advanced Extraction</h3>
+                    <p>Professional-grade PDF and document parsing. Extract clean data for high-quality training instantly.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">🛡️</div>
+                    <h3>Privacy First</h3>
+                    <p>Your data never leaves your metal. Train models locally on your GPU/MPS without cloud dependencies.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="download" class="download-section">
+        <div class="container text-center">
+            <h2 class="reveal-text">Ready to start?</h2>
+            <p class="reveal-text delay-1">Download BlankWhale for your platform and start training in minutes.</p>
+            <div class="download-grid">
+                <a href="../src-tauri/target/release/bundle/dmg/BlankWhale_0.1.1_x64.dmg" class="download-btn">
+                    <span class="os">macOS</span>
+                    <span class="version">.dmg (Intel/M-Series)</span>
+                </a>
+                <a href="#" class="download-btn disabled">
+                    <span class="os">Windows</span>
+                    <span class="version">Coming Soon</span>
+                </a>
+                <a href="#" class="download-btn disabled">
+                    <span class="os">Linux</span>
+                    <span class="version">Coming Soon</span>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container flex justify-between">
+            <p>&copy; 2026 BlankWhale Studio. All rights reserved.</p>
+            <div class="socials">
+                <a href="#">X / Twitter</a>
+                <a href="#">GitHub</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="main.js"></script>
+</body>
+</html>

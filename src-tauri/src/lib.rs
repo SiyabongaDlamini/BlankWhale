@@ -51,8 +51,20 @@ fn get_system_info() -> SystemInfo {
 
 /// Try to find a working python command with necessary AI libraries.
 /// macOS GUI apps strip PATH, so we must explicitly check Homebrew/Conda or local venv.
-fn find_python(engine_dir: &std::path::Path) -> String {
-    // 1. Check for local virtual environment (ai_venv)
+fn find_python(app_handle: &tauri::AppHandle, engine_dir: &std::path::Path) -> String {
+    // 1. Check for persistent virtual environment in app_data_dir
+    if let Ok(data_dir) = app_handle.path().app_data_dir() {
+        #[cfg(target_os = "windows")]
+        let venv_python = data_dir.join("ai_venv").join("Scripts").join("python.exe");
+        #[cfg(not(target_os = "windows"))]
+        let venv_python = data_dir.join("ai_venv").join("bin").join("python3");
+
+        if venv_python.exists() {
+            return venv_python.to_string_lossy().to_string();
+        }
+    }
+
+    // 2. Check for local virtual environment (ai_venv) in engine_dir (Dev fallback)
     #[cfg(target_os = "windows")]
     let venv_python = engine_dir.join("ai_venv").join("Scripts").join("python.exe");
     #[cfg(not(target_os = "windows"))]
@@ -62,7 +74,7 @@ fn find_python(engine_dir: &std::path::Path) -> String {
         return venv_python.to_string_lossy().to_string();
     }
 
-    // 2. Check Homebrew/Conda/System candidates
+    // 3. Check Homebrew/Conda/System candidates
     let candidates = [
         "/opt/homebrew/bin/python3", // Apple Silicon Homebrew
         "/usr/local/bin/python3",    // Intel Homebrew
@@ -78,29 +90,51 @@ fn find_python(engine_dir: &std::path::Path) -> String {
     "python".to_string()
 }
 
-/// Dynamically find the engine directory by walking up from the executable path.
-/// This allows the .app bundle to find the engine/ folder in the project folder.
-fn find_engine_dir() -> std::path::PathBuf {
+/// Dynamically find the engine directory.
+/// In dev: walk up from exe. In production: use resource_dir.
+fn find_engine_dir(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        // Tauri v2 transforms `../engine` into `_up_/engine` during bundling to prevent traversal
+        let engine_path = resource_dir.join("_up_").join("engine");
+        if engine_path.exists() {
+            return engine_path;
+        }
+        // Fallback if bundled differently
+        let engine_path_alt = resource_dir.join("engine");
+        if engine_path_alt.exists() {
+            return engine_path_alt;
+        }
+    }
+
+    // 2. Development path (walking up from exe)
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe;
         while dir.pop() {
-            if dir.join("engine").exists() {
-                return dir;
+            let engine_path = dir.join("engine");
+            if engine_path.exists() {
+                return engine_path;
             }
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| ".".into())
+    std::env::current_dir().unwrap_or_else(|_| ".".into()).join("engine")
 }
 
 /// Spawn the Python WebSocket engine as a child process.
-fn spawn_engine() -> Option<Child> {
-    let engine_dir = find_engine_dir();
-    let python = find_python(&engine_dir);
+fn spawn_engine(app_handle: &tauri::AppHandle) -> Option<Child> {
+    let engine_dir = find_engine_dir(app_handle);
+    let python = find_python(app_handle, &engine_dir);
     log::info!("Starting engine with: {} -m engine.server from {:?}", python, engine_dir);
+
+    let parent_dir = engine_dir.parent().unwrap_or(&engine_dir);
+    let app_data_dir = app_handle.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let hf_home = app_data_dir.join("hf_cache");
+    let _ = std::fs::create_dir_all(&hf_home);
 
     match Command::new(&python)
         .args(["-m", "engine.server"])
-        .current_dir(engine_dir)
+        .current_dir(parent_dir)
+        .env("BLANKWHALE_DATA_DIR", &app_data_dir)
+        .env("HF_HOME", &hf_home)
         .spawn()
     {
         Ok(child) => {
@@ -129,33 +163,92 @@ fn kill_engine(state: &EngineProcess) {
 #[derive(Serialize)]
 pub struct EngineStatus {
     running: bool,
+    installed: bool,
     pid: Option<u32>,
 }
 
 #[tauri::command]
-fn get_engine_status(state: tauri::State<EngineProcess>) -> EngineStatus {
+fn get_engine_status(app_handle: tauri::AppHandle, state: tauri::State<EngineProcess>) -> EngineStatus {
+    let engine_dir = find_engine_dir(&app_handle);
+    let python = find_python(&app_handle, &engine_dir);
+    
+    // Check if we are using a venv (installed)
+    let installed = python.contains("ai_venv");
+
     if let Ok(mut guard) = state.0.lock() {
         if let Some(ref mut child) = *guard {
             // Check if still alive
             match child.try_wait() {
-                Ok(None) => return EngineStatus { running: true, pid: Some(child.id()) },
+                Ok(None) => return EngineStatus { running: true, installed, pid: Some(child.id()) },
                 _ => { *guard = None; }
             }
         }
     }
-    EngineStatus { running: false, pid: None }
+    EngineStatus { running: false, installed, pid: None }
 }
 
 #[tauri::command]
-fn restart_engine(state: tauri::State<EngineProcess>) -> EngineStatus {
+async fn setup_engine(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let data_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    
+    let engine_dir = find_engine_dir(&app_handle);
+    let requirements = engine_dir.join("requirements.txt");
+    
+    if !requirements.exists() {
+        return Err("requirements.txt not found in engine directory".into());
+    }
+
+    log::info!("Setting up AI engine in {:?}", data_dir);
+
+    // 1. Create venv
+    let venv_status = Command::new("python3")
+        .args(["-m", "venv", "ai_venv"])
+        .current_dir(&data_dir)
+        .status()
+        .map_err(|e| e.to_string())?;
+    
+    if !venv_status.success() {
+        return Err("Failed to create virtual environment".into());
+    }
+
+    // 2. Install requirements
+    #[cfg(target_os = "windows")]
+    let pip = data_dir.join("ai_venv").join("Scripts").join("pip.exe");
+    #[cfg(not(target_os = "windows"))]
+    let pip = data_dir.join("ai_venv").join("bin").join("pip");
+
+    let pip_status = Command::new(pip)
+        .args(["install", "-r", requirements.to_str().unwrap()])
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    if !pip_status.success() {
+        return Err("Failed to install requirements".into());
+    }
+
+    Ok("Engine setup complete".into())
+}
+
+#[tauri::command]
+fn restart_engine(app_handle: tauri::AppHandle, state: tauri::State<EngineProcess>) -> EngineStatus {
     kill_engine(&state);
     if let Ok(mut guard) = state.0.lock() {
-        *guard = spawn_engine();
+        *guard = spawn_engine(&app_handle);
         if let Some(ref child) = *guard {
-            return EngineStatus { running: true, pid: Some(child.id()) };
+            // Re-check installed status
+            let engine_dir = find_engine_dir(&app_handle);
+            let python = find_python(&app_handle, &engine_dir);
+            let installed = python.contains("ai_venv");
+
+            return EngineStatus { running: true, installed, pid: Some(child.id()) };
         }
     }
-    EngineStatus { running: false, pid: None }
+    // We need to return the status even if it failed to start
+    let engine_dir = find_engine_dir(&app_handle);
+    let python = find_python(&app_handle, &engine_dir);
+    let installed = python.contains("ai_venv");
+    EngineStatus { running: false, installed, pid: None }
 }
 
 #[tauri::command]
@@ -180,9 +273,10 @@ pub fn run() {
             }
 
             // Auto-start engine on app launch
+            let app_handle = app.handle().clone();
             let state = app.state::<EngineProcess>();
             if let Ok(mut guard) = state.0.lock() {
-                *guard = spawn_engine();
+                *guard = spawn_engine(&app_handle);
             }
 
             Ok(())
@@ -197,7 +291,8 @@ pub fn run() {
             get_system_info,
             greet,
             get_engine_status,
-            restart_engine
+            restart_engine,
+            setup_engine
         ])
         .run(tauri::generate_context!())
         .expect("error while running BlankWhale");

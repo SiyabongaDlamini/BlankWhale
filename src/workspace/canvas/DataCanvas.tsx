@@ -1,8 +1,9 @@
 import { UploadCloud, FileText, FileSpreadsheet, Eye, Trash2, Database } from 'lucide-react';
 import type { LocalFile } from '../FileExplorer';
 import { open } from '@tauri-apps/plugin-dialog';
-import { readFile, writeFile, mkdir } from '@tauri-apps/plugin-fs';
-import { useRef, useState } from 'react';
+import { readFile, writeFile, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs';
+import { appDataDir, join } from '@tauri-apps/api/path';
+import { useState } from 'react';
 import type { useEngine } from '../../hooks/useEngine';
 
 interface DataCanvasProps {
@@ -14,7 +15,6 @@ interface DataCanvasProps {
 }
 
 export default function DataCanvas({ files, setFiles, selectedFile, setSelectedFile, engine }: DataCanvasProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [hfInput, setHfInput] = useState('');
   const [showHfModal, setShowHfModal] = useState(false);
 
@@ -26,7 +26,7 @@ export default function DataCanvas({ files, setFiles, selectedFile, setSelectedF
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  const handleFiles = async (fileList?: FileList | File[]) => {
+  const handleFiles = async () => {
     // If we have a fileList (from drop), we try to get paths if possible, 
     // but better to use the native dialog for all "Upload" actions in Tauri.
     
@@ -40,48 +40,58 @@ export default function DataCanvas({ files, setFiles, selectedFile, setSelectedF
       });
 
       if (selected && Array.isArray(selected)) {
-        for (const filePath of selected) {
+        for (const filePath of selected as string[]) {
           const fileName = filePath.split('/').pop() || 'unknown';
           const ext = fileName.split('.').pop()?.toLowerCase() || 'txt';
           
           // Copy to local data directory
           try {
+            const dataDir = await appDataDir();
+            const absPath = await join(dataDir, 'data', fileName);
+
             const content = await readFile(filePath);
-            await mkdir('data', { recursive: true });
-            await writeFile(`data/${fileName}`, content);
+            await mkdir('data', { baseDir: BaseDirectory.AppData, recursive: true });
+            await writeFile(`data/${fileName}`, content, { baseDir: BaseDirectory.AppData });
             
             setFiles(prev => {
               if (prev.find(f => f.name === fileName)) return prev;
-              return [...prev, {
+              const newFile: LocalFile = {
                 name: fileName,
                 type: ext,
                 size: formatSize(content.length),
                 rawSize: content.length,
                 status: 'ready' as const,
-              }];
+                path: absPath,
+              };
+              return [...prev, newFile];
             });
           } catch (err) {
             console.error(`Failed to copy file ${fileName}:`, err);
           }
         }
       } else if (selected && typeof selected === 'string') {
-          // Single file
-          const filePath = selected;
+          const filePath = selected as string;
           const fileName = filePath.split('/').pop() || 'unknown';
           const ext = fileName.split('.').pop()?.toLowerCase() || 'txt';
+          
+          const dataDir = await appDataDir();
+          const absPath = await join(dataDir, 'data', fileName);
+
           const content = await readFile(filePath);
-          await mkdir('data', { recursive: true });
-          await writeFile(`data/${fileName}`, content);
+          await mkdir('data', { baseDir: BaseDirectory.AppData, recursive: true });
+          await writeFile(`data/${fileName}`, content, { baseDir: BaseDirectory.AppData });
           
           setFiles(prev => {
             if (prev.find(f => f.name === fileName)) return prev;
-            return [...prev, {
+            const newFile: LocalFile = {
               name: fileName,
               type: ext,
               size: formatSize(content.length),
               rawSize: content.length,
               status: 'ready' as const,
-            }];
+              path: absPath,
+            };
+            return [...prev, newFile];
           });
       }
     } catch (err) {
@@ -125,23 +135,12 @@ export default function DataCanvas({ files, setFiles, selectedFile, setSelectedF
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <input 
-        type="file" 
-        multiple 
-        ref={fileInputRef} 
-        onChange={(e) => {
-          if (e.target.files) handleFiles(e.target.files);
-          e.target.value = '';
-        }} 
-        className="hidden" 
-      />
-
       {/* Upload Dropzone */}
       <div className="flex gap-3 m-3 mb-0 flex-shrink-0">
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => handleFiles()}
           className="flex-1 border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all hover:border-[var(--accent)] group"
           style={{ borderColor: 'var(--border-panel)', background: 'var(--bg-panel)' }}
         >

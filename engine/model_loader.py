@@ -4,8 +4,11 @@ Load base models from HuggingFace for fine-tuning.
 """
 
 import os
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
+
+logger = logging.getLogger("blankwhale.model_loader")
 
 
 @dataclass
@@ -71,13 +74,18 @@ def load_model(config: ModelConfig, device: str = "auto"):
         "trust_remote_code": True,
         "device_map": device,
     }
+    logger.info(f"MODEL_LOADER: Loading model from {config.base_model}, cache_dir={config.cache_dir}, device={device}")
     if quantization_config:
         load_kwargs["quantization_config"] = quantization_config
 
-    model = AutoModelForCausalLM.from_pretrained(
-        config.base_model,
-        **load_kwargs,
-    )
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            config.base_model,
+            **load_kwargs,
+        )
+    except Exception as e:
+        logger.error(f"MODEL_LOADER Error: {e}")
+        raise e
 
     # Apply LoRA if needed
     if config.strategy in ("lora", "qlora"):

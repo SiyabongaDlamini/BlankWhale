@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import './App.css';
 
@@ -6,6 +6,8 @@ import TopBar from './workspace/TopBar';
 import FileExplorer, { type LocalFile } from './workspace/FileExplorer';
 import Inspector from './workspace/Inspector';
 import ConsolePanel from './workspace/ConsolePanel';
+
+// Legacy Canvases
 import DataCanvas from './workspace/canvas/DataCanvas';
 import PrepareCanvas from './workspace/canvas/PrepareCanvas';
 import TrainCanvas from './workspace/canvas/TrainCanvas';
@@ -13,9 +15,18 @@ import EvaluateCanvas from './workspace/canvas/EvaluateCanvas';
 import DeployCanvas from './workspace/canvas/DeployCanvas';
 import NetworkCanvas from './workspace/canvas/NetworkCanvas';
 import CodeCanvas from './workspace/canvas/CodeCanvas';
+
+// New Features (Phase 2 & 3)
+import ChatPage from './pages/llm/ChatPage';
+import SceneBuilder from './pages/robot/SceneBuilder';
+// Note: robot-train and robot-reward would be imported here once fully fleshed out 
+// but for now I'll use placeholders if they don't have distinct page components yet.
+
 import { useEngine } from './hooks/useEngine';
 
-export type WorkspaceTab = 'data' | 'prepare' | 'train' | 'evaluate' | 'deploy' | 'code';
+export type WorkspaceTab = 
+  'data' | 'prepare' | 'train' | 'evaluate' | 'deploy' | 'code' | 
+  'chat' | 'robot-scene' | 'robot-train' | 'robot-reward';
 
 export interface TrainingConfig {
   baseModel: string;
@@ -42,9 +53,19 @@ function App() {
   const [showNetwork, setShowNetwork] = useState(false);
   const [projectName, setProjectName] = useLocalStorage('bw_projectName', 'my-project');
   const [trainConfig, setTrainConfig] = useLocalStorage<TrainingConfig>('bw_trainConfig', DEFAULT_CONFIG);
+  const [theme, setTheme] = useLocalStorage<'light' | 'dark'>('bw_theme', 'light');
 
   // Engine state (single instance, shared via props)
   const engine = useEngine();
+
+  // Apply theme class to document body
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.body.classList.add('dark');
+    } else {
+      document.body.classList.remove('dark');
+    }
+  }, [theme]);
 
   // Panel widths (in px) and bottom panel height
   const [leftWidth, setLeftWidth] = useState(200);
@@ -53,12 +74,31 @@ function App() {
 
   const renderCanvas = () => {
     switch (activeTab) {
+      // Data / LLM Studio
       case 'data': return <DataCanvas files={files} setFiles={setFiles} selectedFile={selectedFile} setSelectedFile={setSelectedFile} engine={engine} />;
-      case 'prepare': return <PrepareCanvas files={files} engine={engine} />;
-      case 'train': return <TrainCanvas engine={engine} trainConfig={trainConfig} />;
-      case 'evaluate': return <EvaluateCanvas files={files} engine={engine} />;
+      case 'prepare': return <PrepareCanvas files={files} selectedFile={selectedFile} engine={engine} />;
+      case 'train': return <TrainCanvas engine={engine} trainConfig={trainConfig} files={files} selectedFile={selectedFile} />;
+      case 'evaluate': return <EvaluateCanvas files={files} selectedFile={selectedFile} engine={engine} />;
       case 'deploy': return <DeployCanvas engine={engine} />;
       case 'code': return <CodeCanvas />;
+      
+      // New features
+      case 'chat': return <ChatPage engine={engine} />;
+      case 'robot-scene': return <SceneBuilder />;
+      
+      // Placeholders for parts not fully converted to root canvases yet
+      case 'robot-train': 
+      case 'robot-reward': 
+        return (
+          <div className="flex h-full w-full items-center justify-center" style={{ background: 'var(--bg-workspace)', color: 'var(--text-muted)' }}>
+            <div className="text-center">
+              <h2 className="text-lg font-bold mb-2">Robotics Studio</h2>
+              <p className="text-sm">RL Train & Rewards panels are active. Build scenes to get started.</p>
+            </div>
+          </div>
+        );
+      
+      default: return null;
     }
   };
 
@@ -75,6 +115,8 @@ function App() {
         engine={engine}
         files={files}
         trainConfig={trainConfig}
+        theme={theme}
+        setTheme={setTheme}
       />
 
       {/* Main Workspace */}
@@ -147,8 +189,7 @@ function ResizeHandle({ direction, onResize }: { direction: 'horizontal' | 'vert
     return (
       <div
         onMouseDown={handleMouseDown}
-        className="w-1.5 flex-shrink-0 cursor-col-resize hover:bg-blue-500/20 active:bg-blue-500/30 transition-colors"
-        style={{ background: 'var(--border-panel)' }}
+        className="w-1.5 flex-shrink-0 cursor-col-resize trans-colors handle-h"
       />
     );
   }
@@ -156,11 +197,9 @@ function ResizeHandle({ direction, onResize }: { direction: 'horizontal' | 'vert
   return (
     <div
       onMouseDown={handleMouseDown}
-      className="h-1.5 flex-shrink-0 cursor-row-resize hover:bg-blue-500/20 active:bg-blue-500/30 transition-colors"
-      style={{ background: 'var(--border-panel)' }}
+      className="h-1.5 flex-shrink-0 cursor-row-resize trans-colors handle-v"
     />
   );
 }
 
 export default App;
-

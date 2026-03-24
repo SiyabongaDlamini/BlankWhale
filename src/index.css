@@ -43,6 +43,19 @@
     --input: 240 5% 88%;
     --ring: 211 100% 45%;
   }
+
+  .dark {
+    --bg-workspace: #0d0d14;
+    --bg-panel: #13131d;
+    --bg-surface: #1a1a28;
+    --bg-elevated: #212133;
+    --bg-input: #13131d;
+    --border-panel: rgba(255, 255, 255, 0.08);
+    --border-subtle: rgba(255, 255, 255, 0.04);
+    --text-primary: #f8f9fa;
+    --text-secondary: rgba(255, 255, 255, 0.7);
+    --text-muted: rgba(255, 255, 255, 0.4);
+  }
 }
 
 @layer base {

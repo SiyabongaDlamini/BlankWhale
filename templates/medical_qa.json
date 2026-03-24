@@ -1,0 +1,13 @@
+{
+  "name": "Medical QA",
+  "description": "Generate medical question-answer pairs from clinical text, patient records, and medical literature.",
+  "system_prompt": "You are a medical knowledge assistant. Answer questions accurately based on clinical information provided.",
+  "instruction_templates": [
+    "What does the following medical information indicate?\n\n{text}",
+    "Summarize the key clinical findings:\n\n{text}",
+    "Based on the following patient data, what are the relevant observations?\n\n{text}",
+    "Explain the medical significance of:\n\n{text}",
+    "What diagnosis or condition is described in the following?\n\n{text}"
+  ],
+  "format": "alpaca"
+}
